@@ -8,6 +8,7 @@
 - `roe <file> <symbol>` disassembles one function.
 - `roe <file> --section .text` disassembles a full section.
 - `roe <file> <symbol> --no-color` produces pipe-friendly text.
+- `roe <file> <symbol> --show-bytes` includes raw instruction bytes.
 - `roe <file> <symbol> --json` produces machine-readable output.
 - `roe --help` and `roe --version` render banner/help output.
 
@@ -58,6 +59,7 @@ Responsibilities:
 - Join relocation entries with ELF symbols.
 - Build address-to-symbol indexes.
 - Resolve PLT/GOT-style references where ELF metadata permits it.
+- Synthesize PLT stub symbols such as `printf@plt` where relocation order and `.plt` layout permit it.
 - Demangle C++ names.
 - Provide names suitable for disassembly annotations.
 
@@ -75,6 +77,7 @@ Responsibilities:
 - Render function lists, disassemblies, errors, help, version, and JSON output.
 - Generate stable branch labels (`L1`, `L2`, ...).
 - Render branch target previews inline, for example `je 0x35 → [L1: xor eax, eax]`.
+- Keep raw instruction bytes hidden in text output unless `--show-bytes` is set.
 - Apply or suppress ANSI color based on CLI options, pipe detection, and `NO_COLOR`.
 
 Non-responsibilities:

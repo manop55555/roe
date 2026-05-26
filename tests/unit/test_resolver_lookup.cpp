@@ -121,9 +121,29 @@ bool test_resolver_relocation_lookup() {
            reference->has_addend && reference->name.find("@plt") != std::string::npos;
 }
 
+bool test_resolver_synthesizes_plt_symbols() {
+    roe::elf::File file;
+    file.sections.push_back(roe::elf::Section{".plt", 1, 1U, 0U, 0x1020U, 0U, 0x30U, 16U, true});
+    file.relocations.push_back(
+        make_relocation(".rela.plt", 0x4000U, 7U, "printf", -4, true));
+    file.relocations.push_back(
+        make_relocation(".rela.plt", 0x4008U, 7U, "puts", -4, true));
+
+    const auto result = roe::resolver::build_index(file);
+    if (!result) {
+        return false;
+    }
+
+    const auto printf_symbol = roe::resolver::symbol_at(result.value(), 0x1030U);
+    const auto puts_symbol = roe::resolver::symbol_at(result.value(), 0x1040U);
+    return printf_symbol && printf_symbol->name == "printf@plt" &&
+           puts_symbol && puts_symbol->name == "puts@plt";
+}
+
 bool test_resolver_instruction_annotation() {
     roe::elf::File file;
     file.symbols.push_back(make_symbol("caller", 0x2000U, 0x20U));
+    file.symbols.push_back(make_symbol("callee", 0x3000U, 0x10U));
     file.relocations.push_back(
         make_relocation(".rela.text", 0x2005U, 4U, "target_symbol", 0, false));
 
@@ -146,6 +166,7 @@ bool test_resolver_instruction_annotation() {
     second.mnemonic = "call";
     second.operands = "0";
     second.branch_kind = roe::disasm::BranchKind::Call;
+    second.branch_target = 0x3000U;
     instructions.push_back(second);
 
     const auto annotated = roe::resolver::annotate(result.value(), instructions);
@@ -155,7 +176,9 @@ bool test_resolver_instruction_annotation() {
 
     return annotated[0].symbol.has_value() && !annotated[0].reference.has_value() &&
            annotated[1].symbol.has_value() && annotated[1].reference.has_value() &&
-           annotated[1].reference->raw_name == "target_symbol";
+           annotated[1].reference->raw_name == "target_symbol" &&
+           annotated[1].branch_target_symbol.has_value() &&
+           annotated[1].branch_target_symbol->name == "callee";
 }
 
 } // namespace
@@ -173,6 +196,10 @@ TEST_CASE("test_resolver_relocation_lookup", "[resolver]") {
     REQUIRE(test_resolver_relocation_lookup());
 }
 
+TEST_CASE("test_resolver_synthesizes_plt_symbols", "[resolver]") {
+    REQUIRE(test_resolver_synthesizes_plt_symbols());
+}
+
 TEST_CASE("test_resolver_instruction_annotation", "[resolver]") {
     REQUIRE(test_resolver_instruction_annotation());
 }
@@ -181,7 +208,8 @@ namespace {
 
 bool run_all_tests() {
     return test_resolver_demangle_cpp_names() && test_resolver_symbol_lookup() &&
-           test_resolver_relocation_lookup() && test_resolver_instruction_annotation();
+           test_resolver_relocation_lookup() && test_resolver_synthesizes_plt_symbols() &&
+           test_resolver_instruction_annotation();
 }
 
 } // namespace

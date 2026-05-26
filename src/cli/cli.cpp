@@ -41,6 +41,7 @@ format::Options format_options(const Arguments& parsed) noexcept
     options.no_color_env = no_color_env_set();
     options.color = !parsed.no_color && !options.no_color_env;
     options.preserve_addresses = true;
+    options.show_bytes = parsed.show_bytes;
     return options;
 }
 
@@ -65,6 +66,20 @@ void write_error(std::ostream& stream, const Error& error, const format::Options
         stream << " at offset 0x" << std::hex << error.offset << std::dec;
     }
     stream << '\n';
+}
+
+void write_missing_symbol_error(
+    std::ostream& stream,
+    std::string_view symbol,
+    const elf::File& file)
+{
+    stream << "error: symbol '" << symbol << "' not found in " << file.source_name << "\n";
+    if (file.stripped) {
+        stream << "\n";
+        stream << "hint: the binary is stripped (.symtab is absent). try:\n";
+        stream << "  - using an unstripped binary, or\n";
+        stream << "  - listing available dynamic symbols: roe " << file.source_name << "\n";
+    }
 }
 
 int write_rendered(Result<std::string> rendered, std::ostream& out, std::ostream& err, const format::Options& options)
@@ -145,6 +160,10 @@ Result<Arguments> parse_args(int argc, char** argv)
         }
         if (argument == "--json") {
             parsed.json = true;
+            continue;
+        }
+        if (argument == "--show-bytes") {
+            parsed.show_bytes = true;
             continue;
         }
         if (argument == "--section") {
@@ -247,7 +266,7 @@ int run(const Arguments& args, std::ostream& out, std::ostream& err)
         }
         const std::optional<elf::Symbol> symbol = elf::find_symbol(parsed_file.value(), args.symbol.value());
         if (!symbol.has_value()) {
-            write_error(err, Error{ErrorCode::NotFound, "symbol not found: " + args.symbol.value(), 0, false}, output_options);
+            write_missing_symbol_error(err, args.symbol.value(), parsed_file.value());
             return exit_disasm_error;
         }
 

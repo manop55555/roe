@@ -53,6 +53,7 @@ The public headers in `include/roe/` are the source of truth. This document summ
   - `std::optional<ResolvedReference> relocation_at(const Index& index, std::uint64_t address);`
   - `std::vector<AnnotatedInstruction> annotate(const Index& index, const std::vector<disasm::Instruction>& instructions);`
   - `std::string demangle(std::string_view name);`
+- `AnnotatedInstruction::branch_target_symbol` is populated when a direct branch or call target starts at a known symbol, including synthesized PLT symbols.
 
 ## Formatting: `include/roe/format.hpp`
 
@@ -69,6 +70,7 @@ The public headers in `include/roe/` are the source of truth. This document summ
   - `Result<std::string> render_json(const std::vector<resolver::AnnotatedInstruction>& instructions, const Options& options);`
 - Address text must be preserved. Formatters must not strip or normalize addresses away.
 - Branch previews are presentation logic and are generated here.
+- `Options::show_bytes` controls raw instruction byte rendering. Text output defaults to hiding bytes.
 
 ## CLI: `include/roe/cli.hpp`
 
@@ -83,6 +85,7 @@ The public headers in `include/roe/` are the source of truth. This document summ
   - `1`: usage error
   - `2`: file/ELF input error
   - `3`: disassembly or resolver error
+- `Arguments::show_bytes` is set by `--show-bytes` and restores raw instruction bytes in text output.
 
 ## Version: `include/roe/version.hpp`
 

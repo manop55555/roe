@@ -120,6 +120,7 @@ bool contains(const std::string& text, const std::string& needle)
 struct FixtureBuild {
     std::filesystem::path dir;
     std::filesystem::path c_executable;
+    std::filesystem::path call_targets_executable;
     std::filesystem::path c_object;
     std::filesystem::path cpp_executable;
 };
@@ -128,8 +129,9 @@ FixtureBuild build_fixtures()
 {
     const std::filesystem::path root = repo_root_from(__FILE__);
     const std::filesystem::path fixture_dir = root / "tests" / "fixtures";
-    FixtureBuild build{make_temp_dir(), {}, {}, {}};
+    FixtureBuild build{make_temp_dir(), {}, {}, {}, {}};
     build.c_executable = build.dir / "branch_calls";
+    build.call_targets_executable = build.dir / "test";
     build.c_object = build.dir / "relocations.o";
     build.cpp_executable = build.dir / "cpp_symbols";
 
@@ -141,6 +143,12 @@ FixtureBuild build_fixtures()
         shell_quote(fixture_dir / "branch_calls.c") + " -o " + shell_quote(build.c_executable);
     const CommandResult c_result = run_command(c_compile);
     REQUIRE(c_result.exit_code == 0);
+
+    const std::string call_targets_compile =
+        shell_quote_text(cc) + " -g -O0 " + shell_quote(fixture_dir / "call_targets.c") +
+        " -o " + shell_quote(build.call_targets_executable);
+    const CommandResult call_targets_result = run_command(call_targets_compile);
+    REQUIRE(call_targets_result.exit_code == 0);
 
     const std::string object_compile =
         shell_quote_text(cc) + " -g -O0 -fno-inline -fno-omit-frame-pointer -fPIC -c " +
@@ -164,6 +172,7 @@ TEST_CASE("test_cli_fixtures_compile_from_source", "[integration]")
     const FixtureBuild fixtures = build_fixtures();
 
     REQUIRE(std::filesystem::exists(fixtures.c_executable));
+    REQUIRE(std::filesystem::exists(fixtures.call_targets_executable));
     REQUIRE(std::filesystem::exists(fixtures.c_object));
     REQUIRE(std::filesystem::exists(fixtures.cpp_executable));
 }
@@ -210,6 +219,19 @@ TEST_CASE("test_cli_fixtures_list_and_disassemble_generated_binaries", "[integra
                   << object_result.output << '\n';
     }
     CHECK(resolved_expected_reference);
+
+    const CommandResult call_targets_result =
+        run_command(shell_quote(roe) + " " + shell_quote(fixtures.call_targets_executable) + " main --no-color");
+    REQUIRE(call_targets_result.exit_code == 0);
+    CHECK(contains(call_targets_result.output, "call helper"));
+    CHECK(contains(call_targets_result.output, "call printf@plt"));
+    CHECK(contains(call_targets_result.output, "\342\206\222 [L"));
+    CHECK(!contains(call_targets_result.output, "e8 "));
+
+    const CommandResult call_targets_bytes_result = run_command(
+        shell_quote(roe) + " " + shell_quote(fixtures.call_targets_executable) + " main --show-bytes --no-color");
+    REQUIRE(call_targets_bytes_result.exit_code == 0);
+    CHECK(contains(call_targets_bytes_result.output, "e8 "));
 }
 
 TEST_CASE("test_cli_fixtures_demangles_cpp_symbols", "[integration]")

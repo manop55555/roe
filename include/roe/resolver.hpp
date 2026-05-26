@@ -66,6 +66,7 @@ struct AnnotatedInstruction {
     disasm::Instruction instruction;
     std::optional<ResolvedSymbol> symbol;
     std::optional<ResolvedReference> reference;
+    std::optional<ResolvedSymbol> branch_target_symbol;
 };
 
 /**

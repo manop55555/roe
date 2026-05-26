@@ -9,6 +9,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace roe::resolver {
@@ -37,6 +38,21 @@ bool include_symbol(const elf::Symbol& symbol, const Options& options) noexcept 
 bool is_metadata_relocation_section(std::string_view section_name) noexcept {
     return contains(section_name, ".debug") || contains(section_name, ".eh_frame") ||
            contains(section_name, ".comment") || contains(section_name, ".note");
+}
+
+std::optional<elf::Section> find_plt_section(const elf::File& file) {
+    const auto found = std::find_if(
+        file.sections.begin(),
+        file.sections.end(),
+        [](const elf::Section& section) { return section.name == ".plt"; });
+    if (found == file.sections.end()) {
+        return std::nullopt;
+    }
+    return *found;
+}
+
+bool is_plt_relocation_section(std::string_view section_name) noexcept {
+    return contains(section_name, ".rela.plt") || contains(section_name, ".rel.plt");
 }
 
 std::string display_name(std::string_view raw_name, const Options& options) {
@@ -128,6 +144,7 @@ Result<Index> build_index(const elf::File& file, const Options& options) {
     Index index;
     index.symbols.reserve(file.symbols.size());
     index.relocations.reserve(file.relocations.size());
+    std::vector<std::string> plt_relocation_names;
 
     for (const elf::Symbol& symbol : file.symbols) {
         if (!include_symbol(symbol, options)) {
@@ -150,6 +167,9 @@ Result<Index> build_index(const elf::File& file, const Options& options) {
         }
 
         const std::string raw_name = relocation_raw_name(file, relocation);
+        if (is_plt_relocation_section(relocation.section_name) && !raw_name.empty()) {
+            plt_relocation_names.push_back(raw_name);
+        }
         index.relocations.push_back(ResolvedReference{
             relocation.offset,
             relocation_display_name(raw_name, relocation, options),
@@ -159,6 +179,28 @@ Result<Index> build_index(const elf::File& file, const Options& options) {
             relocation.addend,
             relocation.has_addend,
         });
+    }
+
+    const std::optional<elf::Section> plt_section = find_plt_section(file);
+    if (plt_section.has_value() && plt_section->address != 0U) {
+        constexpr std::uint64_t x86_64_plt_entry_size = 16U;
+        std::uint64_t slot = 1U;
+        for (const std::string& raw_name : plt_relocation_names) {
+            const std::uint64_t address = plt_section->address + (slot * x86_64_plt_entry_size);
+            std::string name = display_name(raw_name, options);
+            if (!contains(name, "@plt")) {
+                name += "@plt";
+            }
+            index.symbols.push_back(ResolvedSymbol{
+                std::move(name),
+                raw_name,
+                address,
+                x86_64_plt_entry_size,
+                false,
+                true,
+            });
+            ++slot;
+        }
     }
 
     std::sort(
@@ -262,6 +304,7 @@ std::vector<AnnotatedInstruction> annotate(
             instruction,
             nearest_symbol(index, instruction.address),
             relocation_in_instruction(index, instruction),
+            instruction.branch_target.has_value() ? symbol_at(index, instruction.branch_target.value()) : std::nullopt,
         });
     }
 

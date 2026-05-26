@@ -46,12 +46,12 @@ bool color_enabled(const Options& options) noexcept
 
 Result<std::string> render_banner()
 {
-    return Result<std::string>::ok(std::string{program_name} + " " + version_string);
+    return Result<std::string>::ok(std::string{program_name} + " v" + version_string + "\nY-Y");
 }
 
 Result<std::string> render_help()
 {
-    return Result<std::string>::ok("usage: roe <file> [symbol] [--section <name>] [--json] [--no-color]");
+    return Result<std::string>::ok("Y-Y\nusage: roe <file> [symbol] [--section <name>] [--json] [--no-color] [--show-bytes]");
 }
 
 Result<std::string> render_error(const Error& error, const Options&)
@@ -163,7 +163,7 @@ std::vector<AnnotatedInstruction> annotate(const Index&, const std::vector<disas
 {
     std::vector<AnnotatedInstruction> annotated;
     for (const disasm::Instruction& instruction : instructions) {
-        annotated.push_back(AnnotatedInstruction{instruction, std::nullopt, std::nullopt});
+        annotated.push_back(AnnotatedInstruction{instruction, std::nullopt, std::nullopt, std::nullopt});
     }
     return annotated;
 }
@@ -235,13 +235,14 @@ ROE_TEST_CASE(test_cli_parse_args_common_forms)
         ROE_CHECK(args.value().file.value() == "sample");
     }
     {
-        roe::Result<roe::cli::Arguments> args = parse({"roe", "sample", "main", "--json", "--no-color"});
+        roe::Result<roe::cli::Arguments> args = parse({"roe", "sample", "main", "--json", "--no-color", "--show-bytes"});
         ROE_REQUIRE(args.has_value());
         ROE_CHECK(args.value().action == roe::cli::Action::DisassembleSymbol);
         ROE_REQUIRE(args.value().symbol.has_value());
         ROE_CHECK(args.value().symbol.value() == "main");
         ROE_CHECK(args.value().json);
         ROE_CHECK(args.value().no_color);
+        ROE_CHECK(args.value().show_bytes);
     }
     {
         roe::Result<roe::cli::Arguments> args = parse({"roe", "sample", "--section", ".text"});
@@ -342,7 +343,8 @@ ROE_TEST_CASE(test_cli_main_entry_error_cases)
         std::ostringstream err;
         const int code = roe::cli::main_entry(static_cast<int>(argv.size()), argv.data(), out, err);
         ROE_CHECK(code == roe::cli::exit_disasm_error);
-        ROE_CHECK(err.str().find("symbol not found") != std::string::npos);
+        ROE_CHECK(err.str().find("symbol 'not_there' not found in sample") != std::string::npos);
+        ROE_CHECK(err.str().find("not found: symbol not found") == std::string::npos);
     }
     {
         std::vector<std::string> args{"roe", "sample", "--bad"};

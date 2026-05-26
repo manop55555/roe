@@ -35,6 +35,7 @@ struct Arguments {
     std::optional<std::string> section;
     bool no_color{false};
     bool json{false};
+    bool show_bytes{false};
 };
 
 inline constexpr int exit_ok = 0;

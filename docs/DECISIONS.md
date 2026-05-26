@@ -11,3 +11,5 @@
 - Generate fuzz corpus seeds locally instead of checking in binary fixtures to keep the repository reviewable and lightweight.
 - Ignore debug and unwind relocation sections during instruction annotation because relocatable objects use section-relative offsets that otherwise collide with `.text`.
 - Render branch previews inline with `\u2192` because the CLI contract requires preview text, not multi-line arrow diagrams.
+- Hide raw instruction bytes by default because the CLI is optimized for human scanning; `--show-bytes` restores them.
+- Synthesize x86-64 PLT symbols from `.rela.plt` order and `.plt` entry layout so direct calls can render as `name@plt`.

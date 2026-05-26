@@ -30,6 +30,7 @@ struct Options {
     bool color{true};
     bool no_color_env{false};
     bool preserve_addresses{true};
+    bool show_bytes{false};
 };
 
 /**

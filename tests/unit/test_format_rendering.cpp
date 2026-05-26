@@ -145,10 +145,41 @@ void test_branch_labels_and_inline_previews()
     roe::format::Options options;
     options.color = false;
     const std::string rendered = roe::format::render_disassembly(instructions, options).value();
+    require_contains(rendered, "0x0000000000000030: je 0x35 \u2192 [L2: xor eax, eax]", "default output should omit raw bytes");
     require_contains(rendered, "jne 0x20 \u2192 [L1: nop]", "lower target should receive the first stable label");
-    require_contains(rendered, "je 0x35 \u2192 [L2: xor eax, eax]", "branch preview should be inline");
     require_contains(rendered, "L2:\n0x0000000000000035", "branch target should receive stable label");
     require_not_contains(rendered, "\n→", "formatter should not draw separate arrow lines");
+
+    options.show_bytes = true;
+    const std::string with_bytes = roe::format::render_disassembly(instructions, options).value();
+    require_contains(with_bytes, "75 de                  jne 0x20", "--show-bytes should restore raw bytes");
+}
+
+void test_cross_function_branch_target_names()
+{
+    std::vector<AnnotatedInstruction> instructions;
+    AnnotatedInstruction call = make_instruction(
+        0x100,
+        {0xe8, 0x34, 0x12, 0x00, 0x00},
+        "call",
+        "0x1239",
+        BranchKind::Call);
+    call.instruction.branch_target = 0x1239;
+    call.branch_target_symbol = roe::resolver::ResolvedSymbol{
+        "helper",
+        "helper",
+        0x1239,
+        16,
+        true,
+        false};
+    instructions.push_back(call);
+
+    roe::format::Options options;
+    options.color = false;
+    const std::string rendered = roe::format::render_disassembly(instructions, options).value();
+    require_contains(rendered, "call helper", "cross-function calls should render target symbol names");
+    require_contains(rendered, "; @0x1239", "cross-function calls should preserve target address in a trailing comment");
+    require_not_contains(rendered, "call 0x1239", "cross-function calls should not leave raw address operands");
 }
 
 void test_json_escaping_and_references()
@@ -176,14 +207,18 @@ void test_json_escaping_and_references()
 void test_banner_and_help()
 {
     const std::string banner = roe::format::render_banner().value();
-    require_contains(banner, "roe 0.1.0", "banner should include program version");
-    require_contains(banner, "Readable object explorer", "banner should include short description");
+    require_contains(banner, "roe v0.1.0", "banner should include program version");
+    require_contains(banner, "a disassembler fit for humans", "banner should include required tagline");
+    require_contains(banner, "Y-Y", "banner should include deer ASCII art");
+    require_contains(banner, "resolve relocations", "banner should include feature line");
 
     const std::string help = roe::format::render_help().value();
+    require_contains(help, "Y-Y", "help should include banner art");
     require_contains(help, "roe <file> <symbol>", "help should document symbol disassembly");
     require_contains(help, "--section <name>", "help should document section disassembly");
     require_contains(help, "--json", "help should document JSON output");
     require_contains(help, "--no-color", "help should document color suppression");
+    require_contains(help, "--show-bytes", "help should document byte display flag");
 }
 
 } // namespace
@@ -195,6 +230,7 @@ int main()
         test_function_list_preserves_addresses,
         test_function_list_uses_resolver_display_names,
         test_branch_labels_and_inline_previews,
+        test_cross_function_branch_target_names,
         test_json_escaping_and_references,
         test_banner_and_help,
     };

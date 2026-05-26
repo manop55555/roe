@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.16)
 project(
     roe
     VERSION 0.1.0
-    DESCRIPTION "Readable object explorer"
+    DESCRIPTION "A disassembler fit for humans"
     LANGUAGES CXX
 )
 

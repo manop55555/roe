@@ -69,6 +69,21 @@ std::string instruction_text(const disasm::Instruction& instruction)
     return instruction.mnemonic + " " + instruction.operands;
 }
 
+std::string banner_text()
+{
+    std::ostringstream out;
+    out << program_name << " v" << version_string << " \342\200\224 a disassembler fit for humans\n\n";
+    out << "           (             )\n";
+    out << "            `--(_   _)--'\n";
+    out << "                 Y-Y\n";
+    out << "                /@@ \\\n";
+    out << "               /     \\\n";
+    out << "               `--'.  \\             ,\n";
+    out << "                   |   `.__________/)\n\n";
+    out << "resolve relocations \302\267 preview branch targets \302\267 clean output\n";
+    return out.str();
+}
+
 std::string display_name_for_function(const elf::Symbol& function, const resolver::Index& index)
 {
     const auto exact = std::find_if(
@@ -262,20 +277,17 @@ bool color_enabled(const Options& options) noexcept
 
 Result<std::string> render_banner()
 {
-    std::ostringstream out;
-    out << program_name << " " << version_string << "\n";
-    out << "Readable object explorer\n";
-    return Result<std::string>::ok(out.str());
+    return Result<std::string>::ok(banner_text());
 }
 
 Result<std::string> render_help()
 {
     std::ostringstream out;
-    out << "roe " << version_string << "\n";
+    out << banner_text() << "\n";
     out << "Usage:\n";
     out << "  roe <file>\n";
-    out << "  roe <file> <symbol> [--no-color] [--json]\n";
-    out << "  roe <file> --section <name> [--no-color] [--json]\n";
+    out << "  roe <file> <symbol> [--no-color] [--show-bytes] [--json]\n";
+    out << "  roe <file> --section <name> [--no-color] [--show-bytes] [--json]\n";
     out << "  roe --help\n";
     out << "  roe --version\n\n";
     out << "Commands:\n";
@@ -285,6 +297,7 @@ Result<std::string> render_help()
     out << "Options:\n";
     out << "  --json                 Emit machine-readable JSON\n";
     out << "  --no-color             Disable ANSI color for pipes and logs\n";
+    out << "  --show-bytes           Show raw instruction bytes\n";
     out << "  --help                 Show this help text\n";
     out << "  --version              Show version banner\n";
     return Result<std::string>::ok(out.str());
@@ -373,30 +386,48 @@ Result<std::string> render_disassembly(
         }
 
         out << colorize(padded_hex_address(instruction.address), ansi_dim, options) << ": ";
-        const std::string bytes = bytes_text(instruction.bytes);
-        if (!bytes.empty()) {
-            out << std::left << std::setw(23) << bytes << std::right;
-        } else {
-            out << std::left << std::setw(23) << "" << std::right;
+        if (options.show_bytes) {
+            const std::string bytes = bytes_text(instruction.bytes);
+            if (!bytes.empty()) {
+                out << std::left << std::setw(23) << bytes << std::right;
+            } else {
+                out << std::left << std::setw(23) << "" << std::right;
+            }
         }
 
         out << colorize(instruction.mnemonic, ansi_green, options);
-        if (!instruction.operands.empty()) {
-            out << ' ' << instruction.operands;
-        }
 
+        bool branch_target_is_in_current_output = false;
+        std::optional<std::string> preview;
         if (instruction.branch_target.has_value()) {
             const std::uint64_t target = instruction.branch_target.value();
-            const std::string target_text = hex_address(target);
-            if (instruction.operands.find(target_text) == std::string::npos) {
-                out << ' ' << target_text;
+            branch_target_is_in_current_output = labels.find(target) != labels.end();
+            preview = preview_for_target(instructions, labels, target);
+        }
+
+        if (instruction.branch_target.has_value() && !branch_target_is_in_current_output &&
+            annotated.branch_target_symbol.has_value()) {
+            out << ' ' << annotated.branch_target_symbol->name;
+        } else {
+            if (!instruction.operands.empty()) {
+                out << ' ' << instruction.operands;
             }
-            const std::optional<std::string> preview = preview_for_target(instructions, labels, target);
-            if (preview.has_value()) {
-                out << " \u2192 [" << preview.value() << "]";
+            if (instruction.branch_target.has_value()) {
+                const std::uint64_t target = instruction.branch_target.value();
+                const std::string target_text = hex_address(target);
+                if (instruction.operands.find(target_text) == std::string::npos) {
+                    out << ' ' << target_text;
+                }
             }
         }
 
+        if (preview.has_value()) {
+            out << " \u2192 [" << preview.value() << "]";
+        }
+        if (instruction.branch_target.has_value() && !branch_target_is_in_current_output &&
+            annotated.branch_target_symbol.has_value()) {
+            out << "  " << colorize("; ", ansi_cyan, options) << "@" << hex_address(instruction.branch_target.value());
+        }
         if (annotated.reference.has_value()) {
             out << "  " << colorize("; ref ", ansi_cyan, options) << annotated.reference->name;
             out << " @" << hex_address(annotated.reference->address);
