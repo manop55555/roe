@@ -39,8 +39,13 @@ constexpr std::uint16_t et_dyn = 3U;
 constexpr std::uint16_t et_core = 4U;
 
 constexpr std::uint16_t em_386 = 3U;
+constexpr std::uint16_t em_mips = 8U;
+constexpr std::uint16_t em_ppc = 20U;
+constexpr std::uint16_t em_ppc64 = 21U;
+constexpr std::uint16_t em_arm = 40U;
 constexpr std::uint16_t em_x86_64 = 62U;
 constexpr std::uint16_t em_aarch64 = 183U;
+constexpr std::uint16_t em_riscv = 243U;
 
 constexpr std::uint32_t sht_symtab = 2U;
 constexpr std::uint32_t sht_strtab = 3U;
@@ -252,6 +257,16 @@ Machine map_machine(std::uint16_t value) noexcept
         return Machine::X86_64;
     case em_aarch64:
         return Machine::AArch64;
+    case em_arm:
+        return Machine::Arm;
+    case em_riscv:
+        return Machine::RiscV;
+    case em_mips:
+        return Machine::Mips;
+    case em_ppc:
+        return Machine::PowerPc;
+    case em_ppc64:
+        return Machine::PowerPc64;
     default:
         return Machine::Other;
     }
@@ -746,10 +761,16 @@ Result<void> parse_relocations(
                 }
             }
 
-            if (relocation.symbol_index >= symbol_table.size()) {
+            // Symbol index 0 is STN_UNDEF: a valid "no symbol" reference used by
+            // RELATIVE/IRELATIVE relocations, which commonly live in sections whose
+            // sh_link is 0 (no associated symbol table). Only a nonzero index that
+            // exceeds the table is malformed.
+            if (relocation.symbol_index != 0U && relocation.symbol_index >= symbol_table.size()) {
                 return Result<void>::err(make_error(ErrorCode::MalformedInput, "relocation references invalid symbol index"));
             }
-            relocation.symbol_name = symbol_table[static_cast<std::size_t>(relocation.symbol_index)].name;
+            if (relocation.symbol_index < symbol_table.size()) {
+                relocation.symbol_name = symbol_table[static_cast<std::size_t>(relocation.symbol_index)].name;
+            }
             file.relocations.push_back(std::move(relocation));
         }
     }
