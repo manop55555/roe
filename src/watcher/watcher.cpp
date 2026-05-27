@@ -44,19 +44,34 @@ bool file_signature(const std::filesystem::path& path, std::uint64_t& signature)
 {
     const std::chrono::milliseconds interval =
         options.debounce.count() > 0 ? options.debounce : std::chrono::milliseconds(200);
-    std::uint64_t last = 0;
-    file_signature(path, last);
+    std::uint64_t state = 0;
+    detail::changed_since(path, state); // prime the baseline
     while (true) {
         std::this_thread::sleep_for(interval);
-        std::uint64_t current = 0;
-        if (file_signature(path, current) && current != last) {
-            last = current;
+        if (detail::changed_since(path, state)) {
             callback(Event{path, EventKind::Modified});
         }
     }
 }
 
 } // namespace
+
+namespace detail {
+
+bool changed_since(const std::filesystem::path& path, std::uint64_t& state)
+{
+    std::uint64_t signature = 0;
+    if (!file_signature(path, signature)) {
+        return false;
+    }
+    if (signature != state) {
+        state = signature;
+        return true;
+    }
+    return false;
+}
+
+} // namespace detail
 
 Result<void> watch_file(const std::filesystem::path& path, const Options& options, Callback callback)
 {

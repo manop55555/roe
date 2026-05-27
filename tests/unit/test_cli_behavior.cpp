@@ -92,3 +92,23 @@ TEST_CASE("main_entry returns documented exit codes", "[cli]")
     CHECK(run_cli({"roe", ROE_FIXTURE_ELF, "--xref", "compute"}) == exit_ok);
     CHECK(run_cli({"roe", ROE_FIXTURE_ELF, "nonexistent_symbol"}) == exit_disasm_error);
 }
+
+TEST_CASE("main_entry runs every workflow on the fixture", "[cli]")
+{
+    CHECK(run_cli({"roe", ROE_FIXTURE_ELF, "--all"}) == exit_ok);
+    CHECK(run_cli({"roe", ROE_FIXTURE_ELF, "--grep", "comp"}) == exit_ok);
+    CHECK(run_cli({"roe", ROE_FIXTURE_ELF, "--calls", "printf"}) == exit_ok);
+    CHECK(run_cli({"roe", ROE_FIXTURE_ELF, "--contains", "result"}) == exit_ok);
+    CHECK(run_cli({"roe", ROE_FIXTURE_ELF, "compute", "--source"}) == exit_ok);
+    CHECK(run_cli({"roe", ROE_FIXTURE_ELF, "compute", "--show-bytes"}) == exit_ok);
+    CHECK(run_cli({"roe", ROE_FIXTURE_ELF, "compute", "--no-color"}) == exit_ok);
+    CHECK(run_cli({"roe", "--completions", "zsh"}) == exit_ok);
+    CHECK(run_cli({"roe", "--help", "json"}) == exit_ok);
+    CHECK(run_cli({"roe", "--help", "bogus"}) == exit_usage);
+    CHECK(run_cli({"roe", "--completions", "tcsh"}) == exit_usage);
+    CHECK(run_cli({"roe", ROE_FIXTURE_ELF, "--section", ".does_not_exist"}) == exit_file_error);
+    CHECK(run_cli({"roe", ROE_FIXTURE_ELF, "compute", "--arch", "x86_64"}) == exit_ok);
+    CHECK(run_cli({"roe", ROE_FIXTURE_ELF, "--grep", "zzzznomatch"}) == exit_ok);
+    CHECK(run_cli({"roe", ROE_FIXTURE_ELF, "--contains", "zzzznomatch"}) == exit_ok);
+    CHECK(run_cli({"roe", ROE_FIXTURE_ELF, "--calls", "zzzznomatch"}) == exit_ok);
+}

@@ -173,8 +173,27 @@ if(ROE_BUILD_TESTS)
         DEPENDS "${ROE_FIXTURE_C_SRC}"
         COMMENT "Compiling x86-64 ELF test fixture"
         VERBATIM)
-    set(ROE_FIXTURE_OUTPUTS "${ROE_FIXTURE_ELF}")
-    set(ROE_FIXTURE_DEFINES ROE_FIXTURE_ELF="${ROE_FIXTURE_ELF}" ROE_FIXTURE_SRC="${ROE_FIXTURE_C_SRC}")
+    set(ROE_FIXTURE_ELF_V4 "${ROE_FIXTURE_BIN_DIR}/sample.dwarf4.elf64")
+    add_custom_command(
+        OUTPUT "${ROE_FIXTURE_ELF_V4}"
+        COMMAND "${CMAKE_CXX_COMPILER}" -x c -gdwarf-4 -O1 -o "${ROE_FIXTURE_ELF_V4}" "${ROE_FIXTURE_C_SRC}"
+        DEPENDS "${ROE_FIXTURE_C_SRC}"
+        COMMENT "Compiling DWARF 4 ELF test fixture"
+        VERBATIM)
+    set(ROE_FIXTURE_OUTPUTS "${ROE_FIXTURE_ELF}" "${ROE_FIXTURE_ELF_V4}")
+    set(ROE_FIXTURE_DEFINES
+        ROE_FIXTURE_ELF="${ROE_FIXTURE_ELF}"
+        ROE_FIXTURE_ELF_V4="${ROE_FIXTURE_ELF_V4}"
+        ROE_FIXTURE_SRC="${ROE_FIXTURE_C_SRC}")
+    set(ROE_FIXTURE_NODEBUG "${ROE_FIXTURE_BIN_DIR}/sample.nodebug.elf64")
+    add_custom_command(
+        OUTPUT "${ROE_FIXTURE_NODEBUG}"
+        COMMAND "${CMAKE_CXX_COMPILER}" -x c -O2 -g0 -o "${ROE_FIXTURE_NODEBUG}" "${ROE_FIXTURE_C_SRC}"
+        DEPENDS "${ROE_FIXTURE_C_SRC}"
+        COMMENT "Compiling no-debug ELF test fixture"
+        VERBATIM)
+    list(APPEND ROE_FIXTURE_OUTPUTS "${ROE_FIXTURE_NODEBUG}")
+    list(APPEND ROE_FIXTURE_DEFINES ROE_FIXTURE_NODEBUG="${ROE_FIXTURE_NODEBUG}")
     if(EXISTS "${ROE_FIXTURE_CPP_SRC}")
         add_custom_command(
             OUTPUT "${ROE_FIXTURE_CPP}"

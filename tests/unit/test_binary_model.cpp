@@ -53,6 +53,32 @@ TEST_CASE("load_bytes reports unknown formats with a hex dump", "[binary]")
     CHECK(result.error().message.find("01 02 03 04") != std::string::npos);
 }
 
+TEST_CASE("binary helpers handle empty and missing inputs", "[binary]")
+{
+    const FileView empty;
+    CHECK_FALSE(primary_object(empty).has_value());
+    CHECK_FALSE(find_section(empty, 0, ".text").has_value());
+    CHECK(function_symbols(empty, 0).empty());
+    CHECK_FALSE(find_symbol(empty, 5, "x").has_value());
+
+    for (const Architecture arch : {Architecture::Unknown, Architecture::X86, Architecture::X86_64,
+             Architecture::Arm, Architecture::ArmThumb, Architecture::AArch64, Architecture::RiscV32,
+             Architecture::RiscV64, Architecture::Mips32, Architecture::Mips32el, Architecture::Mips64,
+             Architecture::Mips64el, Architecture::PowerPc32, Architecture::PowerPc64, Architecture::PowerPc64le}) {
+        CHECK_FALSE(architecture_name(arch).empty());
+    }
+    for (const Format format : {Format::Unknown, Format::Elf, Format::MachO, Format::MachOFat,
+             Format::PeCoff, Format::Archive}) {
+        CHECK_FALSE(format_name(format).empty());
+    }
+    CHECK(architecture_name(Architecture::PowerPc64le) == "ppc64le");
+    CHECK(format_name(Format::Archive) == "static archive");
+
+    const auto missing = load_file("/nonexistent/roe/file");
+    REQUIRE_FALSE(missing.has_value());
+    CHECK(missing.error().code == roe::ErrorCode::FileIo);
+}
+
 TEST_CASE("the ELF adapter normalizes the fixture", "[binary]")
 {
     const roe::Result<std::unique_ptr<BinaryFile>> loaded = load_file(ROE_FIXTURE_ELF);

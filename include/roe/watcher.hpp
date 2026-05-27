@@ -34,6 +34,16 @@ struct Options {
 
 using Callback = std::function<void(const Event&)>;
 
+namespace detail {
+
+/**
+ * @brief Update @p state and return true when the file's change signature
+ *        (mtime, size, inode) differs from it. Exposed for testing.
+ */
+bool changed_since(const std::filesystem::path& path, std::uint64_t& state);
+
+} // namespace detail
+
 /**
  * @brief Watch one file and invoke the callback after changes.
  */
