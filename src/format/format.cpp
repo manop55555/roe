@@ -201,6 +201,43 @@ std::string json_escape(std::string_view value)
     return out.str();
 }
 
+// Escape control characters and truncate a string literal to 64 source characters
+// for inline annotation, appending a single-character ellipsis when truncated.
+std::string string_preview(const std::string& value)
+{
+    constexpr std::size_t limit = 64;
+    const bool truncated = value.size() > limit;
+    const std::size_t count = truncated ? limit : value.size();
+    std::string escaped;
+    for (std::size_t index = 0; index < count; ++index) {
+        const char character = value[index];
+        switch (character) {
+        case '\n':
+            escaped += "\\n";
+            break;
+        case '\t':
+            escaped += "\\t";
+            break;
+        case '\r':
+            escaped += "\\r";
+            break;
+        case '"':
+            escaped += "\\\"";
+            break;
+        case '\\':
+            escaped += "\\\\";
+            break;
+        default:
+            escaped += character;
+            break;
+        }
+    }
+    if (truncated) {
+        escaped += "…";
+    }
+    return escaped;
+}
+
 std::map<std::uint64_t, std::string> build_labels(
     const std::vector<resolver::AnnotatedInstruction>& instructions)
 {
@@ -504,6 +541,42 @@ Result<std::string> render_function_list(
     return Result<std::string>::ok(out.str());
 }
 
+Result<std::string> render_function_table(
+    std::string_view heading,
+    const std::vector<binary::Symbol>& functions,
+    const resolver::Index& index,
+    const Options& options)
+{
+    std::vector<binary::Symbol> sorted = functions;
+    std::sort(sorted.begin(), sorted.end(), [](const binary::Symbol& lhs, const binary::Symbol& rhs) {
+        if (lhs.address == rhs.address) {
+            return lhs.name < rhs.name;
+        }
+        return lhs.address < rhs.address;
+    });
+
+    const auto display_for = [&index](const binary::Symbol& function) -> std::string {
+        for (const resolver::ResolvedSymbol& symbol : index.symbols) {
+            if (symbol.address == function.address && symbol.raw_name == function.raw_name) {
+                return symbol.name;
+            }
+        }
+        return function.name;
+    };
+
+    std::ostringstream out;
+    out << colorize(heading, ansi_bold, options) << "\n";
+    for (const binary::Symbol& function : sorted) {
+        out << padded_hex_address(function.address) << "  ";
+        out << std::setw(8) << std::dec << function.size << "  " << display_for(function);
+        if (function.dynamic) {
+            out << " " << colorize("[dyn]", ansi_dim, options);
+        }
+        out << "\n";
+    }
+    return Result<std::string>::ok(out.str());
+}
+
 Result<std::string> render_disassembly(
     const std::vector<resolver::AnnotatedInstruction>& instructions,
     const Options& options)
@@ -584,6 +657,10 @@ Result<std::string> render_disassembly(
             out << "  " << colorize("; ref ", ansi_cyan, options) << annotated.reference->name;
             out << " @" << hex_address(annotated.reference->address);
         }
+        if (annotated.string_reference.has_value()) {
+            out << "  " << colorize("; ", ansi_cyan, options) << "\""
+                << string_preview(annotated.string_reference->value) << "\"";
+        }
         if (annotated.symbol.has_value() && annotated.symbol->exact) {
             out << "  " << colorize("; sym ", ansi_cyan, options) << annotated.symbol->name;
         }
@@ -647,6 +724,13 @@ Result<std::string> render_json(
         out << "      \"reference\": ";
         if (annotated.reference.has_value()) {
             append_reference_json(out, annotated.reference.value());
+        } else {
+            out << "null";
+        }
+        out << ",\n";
+        out << "      \"string_reference\": ";
+        if (annotated.string_reference.has_value()) {
+            out << "\"" << json_escape(annotated.string_reference->value) << "\"";
         } else {
             out << "null";
         }
@@ -784,6 +868,106 @@ Result<std::string> render_completions(const std::string& shell)
     } else {
         return Result<std::string>::err(
             {ErrorCode::Usage, "unknown shell: " + shell + " (try bash, zsh, fish, powershell)"});
+    }
+    return Result<std::string>::ok(out.str());
+}
+
+Result<std::string> render_xrefs(const std::vector<features::Xref>& xrefs, const Options& options)
+{
+    std::ostringstream out;
+    if (options.mode == Mode::Json) {
+        out << "{\n  \"xrefs\": [\n";
+        for (std::size_t index = 0; index < xrefs.size(); ++index) {
+            const features::Xref& xref = xrefs[index];
+            out << "    {";
+            out << "\"from\":\"" << json_escape(xref.from_function) << "\",";
+            out << "\"from_address\":\"" << hex_address(xref.from_function_address) << "\",";
+            out << "\"address\":\"" << hex_address(xref.instruction_address) << "\",";
+            out << "\"target\":\"" << json_escape(xref.target_name) << "\",";
+            out << "\"target_address\":\"" << hex_address(xref.target_address) << "\",";
+            out << "\"instruction\":\"" << json_escape(xref.instruction_text) << "\"";
+            out << "}" << (index + 1U < xrefs.size() ? "," : "") << "\n";
+        }
+        out << "  ]\n}\n";
+        return Result<std::string>::ok(out.str());
+    }
+
+    if (xrefs.empty()) {
+        out << "no references found\n";
+        return Result<std::string>::ok(out.str());
+    }
+    out << colorize("References to ", ansi_bold, options) << xrefs.front().target_name << " ("
+        << xrefs.size() << ")\n";
+    for (const features::Xref& xref : xrefs) {
+        out << colorize(padded_hex_address(xref.instruction_address), ansi_dim, options) << "  ";
+        out << colorize(xref.from_function, ansi_green, options) << "  " << xref.instruction_text << "\n";
+    }
+    return Result<std::string>::ok(out.str());
+}
+
+Result<std::string> render_stats(const std::vector<features::FunctionStats>& stats, const Options& options)
+{
+    std::ostringstream out;
+    if (options.mode == Mode::Json) {
+        out << "{\n  \"stats\": [\n";
+        for (std::size_t index = 0; index < stats.size(); ++index) {
+            const features::FunctionStats& entry = stats[index];
+            out << "    {";
+            out << "\"name\":\"" << json_escape(entry.name) << "\",";
+            out << "\"address\":\"" << hex_address(entry.address) << "\",";
+            out << "\"size\":" << entry.size << ",";
+            out << "\"basic_blocks\":" << entry.basic_blocks << ",";
+            out << "\"branch_count\":" << entry.branch_count << ",";
+            out << "\"max_nesting_depth\":" << entry.max_nesting_depth;
+            out << "}" << (index + 1U < stats.size() ? "," : "") << "\n";
+        }
+        out << "  ]\n}\n";
+        return Result<std::string>::ok(out.str());
+    }
+
+    out << colorize("Statistics", ansi_bold, options) << "\n";
+    out << "      size  blocks  branch  depth  function\n";
+    for (const features::FunctionStats& entry : stats) {
+        out << std::right << std::setw(10) << std::dec << entry.size << "  ";
+        out << std::setw(6) << entry.basic_blocks << "  ";
+        out << std::setw(6) << entry.branch_count << "  ";
+        out << std::setw(5) << entry.max_nesting_depth << "  ";
+        out << entry.name << "\n";
+    }
+    return Result<std::string>::ok(out.str());
+}
+
+Result<std::string> render_sections(const binary::FileView& file, const Options& options)
+{
+    const std::optional<binary::Object> object = binary::primary_object(file);
+    std::ostringstream out;
+    if (options.mode == Mode::Json) {
+        out << "{\n  \"sections\": [\n";
+        const std::vector<binary::Section> sections = object.has_value() ? object->sections : std::vector<binary::Section>{};
+        for (std::size_t index = 0; index < sections.size(); ++index) {
+            const binary::Section& section = sections[index];
+            out << "    {";
+            out << "\"name\":\"" << json_escape(section.name) << "\",";
+            out << "\"address\":\"" << hex_address(section.address) << "\",";
+            out << "\"size\":" << section.size << ",";
+            out << "\"readable\":" << (section.readable ? "true" : "false") << ",";
+            out << "\"writable\":" << (section.writable ? "true" : "false") << ",";
+            out << "\"executable\":" << (section.executable ? "true" : "false");
+            out << "}" << (index + 1U < sections.size() ? "," : "") << "\n";
+        }
+        out << "  ]\n}\n";
+        return Result<std::string>::ok(out.str());
+    }
+
+    out << colorize("Sections", ansi_bold, options) << " in " << file.source_name << "\n";
+    if (object.has_value()) {
+        for (const binary::Section& section : object->sections) {
+            const std::string flags = std::string(section.readable ? "r" : "-") +
+                                      (section.writable ? "w" : "-") + (section.executable ? "x" : "-");
+            out << padded_hex_address(section.address) << "  ";
+            out << std::right << std::setw(10) << std::dec << section.size << "  ";
+            out << flags << "  " << section.name << "\n";
+        }
     }
     return Result<std::string>::ok(out.str());
 }

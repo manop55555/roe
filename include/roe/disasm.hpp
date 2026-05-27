@@ -73,6 +73,7 @@ struct Instruction {
     std::string operands;
     BranchKind branch_kind{BranchKind::None};
     std::optional<std::uint64_t> branch_target;
+    std::optional<std::uint64_t> reference_target; ///< Effective address of a data/memory operand, if any.
 };
 
 /**

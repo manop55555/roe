@@ -73,6 +73,7 @@ struct AnnotatedInstruction {
     std::optional<ResolvedSymbol> symbol;
     std::optional<ResolvedReference> reference;
     std::optional<ResolvedSymbol> branch_target_symbol;
+    std::optional<binary::StringLiteral> string_reference;
 };
 
 /**

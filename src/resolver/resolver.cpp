@@ -446,6 +446,7 @@ std::vector<AnnotatedInstruction> annotate(
             nearest_symbol(index, instruction.address),
             relocation_in_instruction(index, instruction),
             instruction.branch_target.has_value() ? symbol_at(index, instruction.branch_target.value()) : std::nullopt,
+            std::nullopt,
         });
     }
 

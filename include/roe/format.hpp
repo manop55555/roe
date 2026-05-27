@@ -89,6 +89,15 @@ Result<std::string> render_function_list(
     const Options& options);
 
 /**
+ * @brief Render a heading and a table of the given function symbols.
+ */
+Result<std::string> render_function_table(
+    std::string_view heading,
+    const std::vector<binary::Symbol>& functions,
+    const resolver::Index& index,
+    const Options& options);
+
+/**
  * @brief Render annotated instructions as text.
  */
 Result<std::string> render_disassembly(

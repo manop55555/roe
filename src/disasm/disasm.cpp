@@ -273,6 +273,31 @@ Result<CapstoneHandle> open_engine(const Options& options) {
     return std::nullopt;
 }
 
+// Effective address of a data/memory operand, used to annotate string references.
+// Implemented for x86 RIP-relative and absolute memory operands (the common case
+// for string loads); other ISAs use multi-instruction address materialization and
+// are left unresolved here.
+[[nodiscard]] std::optional<std::uint64_t> data_reference(Architecture architecture, const cs_insn& in) noexcept {
+    if (in.detail == nullptr || family_of(architecture) != Family::X86) {
+        return std::nullopt;
+    }
+    const cs_x86& detail = in.detail->x86;
+    for (std::uint8_t i = 0; i < detail.op_count; ++i) {
+        if (detail.operands[i].type != X86_OP_MEM) {
+            continue;
+        }
+        const x86_op_mem& mem = detail.operands[i].mem;
+        if (mem.base == X86_REG_RIP) {
+            return in.address + in.size + static_cast<std::uint64_t>(mem.disp);
+        }
+        if (mem.base == X86_REG_INVALID && mem.index == X86_REG_INVALID && mem.segment == X86_REG_INVALID &&
+            mem.disp > 0) {
+            return static_cast<std::uint64_t>(mem.disp);
+        }
+    }
+    return std::nullopt;
+}
+
 [[nodiscard]] bool is_unconditional_jump(Architecture architecture, const cs_insn& in) noexcept {
     if (family_of(architecture) == Family::X86) {
         return in.id == X86_INS_JMP;
@@ -540,6 +565,7 @@ Result<std::vector<Instruction>> disassemble_bytes(CodeBuffer code, const Option
         if (options.resolve_branch_targets && is_branch(instruction.branch_kind)) {
             instruction.branch_target = direct_target(options.architecture, raw);
         }
+        instruction.reference_target = data_reference(options.architecture, raw);
         instructions.push_back(std::move(instruction));
     }
 

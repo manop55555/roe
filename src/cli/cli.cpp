@@ -5,6 +5,7 @@
 
 #include "roe/binary.hpp"
 #include "roe/disasm.hpp"
+#include "roe/features.hpp"
 #include "roe/format.hpp"
 #include "roe/resolver.hpp"
 #include "roe/version.hpp"
@@ -353,6 +354,7 @@ int run_disassemble_symbol(
     }
 
     std::vector<resolver::AnnotatedInstruction> annotated = resolver::annotate(index, decoded.value());
+    annotated = features::annotate_string_references(object, annotated);
     return write_rendered(render_annotated(annotated, args, opts), out, err, opts);
 }
 
@@ -385,6 +387,7 @@ int run_disassemble_section(
     }
 
     std::vector<resolver::AnnotatedInstruction> annotated = resolver::annotate(index, decoded.value());
+    annotated = features::annotate_string_references(object, annotated);
     return write_rendered(render_annotated(annotated, args, opts), out, err, opts);
 }
 
@@ -413,6 +416,7 @@ int run_disassemble_all(
             continue;
         }
         std::vector<resolver::AnnotatedInstruction> annotated = resolver::annotate(index, decoded.value());
+        annotated = features::annotate_string_references(object, annotated);
         Result<std::string> rendered = render_annotated(annotated, args, opts);
         if (!rendered) {
             continue;
@@ -430,6 +434,114 @@ int run_disassemble_all(
     }
     write_line(out, combined);
     return exit_ok;
+}
+
+std::vector<features::FunctionBody> build_function_bodies(
+    const binary::BinaryFile& file,
+    const binary::Object& object,
+    const resolver::Index& index,
+    const disasm::Options& decode)
+{
+    std::vector<features::FunctionBody> bodies;
+    for (const binary::Symbol& symbol : object.symbols) {
+        if (symbol.type != binary::SymbolType::Function || !symbol.defined || symbol.name.empty()) {
+            continue;
+        }
+        if (symbol.name.rfind(".L", 0) == 0 || symbol.name.front() == '$') {
+            continue;
+        }
+        Result<std::vector<disasm::Instruction>> decoded = disasm::disassemble_function(file, object, symbol, decode);
+        if (!decoded) {
+            continue;
+        }
+        std::vector<resolver::AnnotatedInstruction> annotated = resolver::annotate(index, decoded.value());
+        annotated = features::annotate_string_references(object, annotated);
+        bodies.push_back(features::FunctionBody{symbol, std::move(annotated)});
+    }
+    return bodies;
+}
+
+int run_list(
+    const binary::BinaryFile& file,
+    const binary::Object& object,
+    const resolver::Index& index,
+    const Arguments& args,
+    const format::Options& opts,
+    std::ostream& out,
+    std::ostream& err)
+{
+    const std::string source = file.view().source_name;
+    if (args.grep_pattern.has_value()) {
+        const std::vector<binary::Symbol> functions = binary::function_symbols(file.view(), 0);
+        Result<std::vector<binary::Symbol>> filtered = features::filter_functions(functions, args.grep_pattern.value());
+        if (!filtered) {
+            write_error(err, filtered.error(), opts);
+            return exit_for(filtered.error().code);
+        }
+        return write_rendered(
+            format::render_function_table("Functions matching /" + args.grep_pattern.value() + "/ in " + source,
+                filtered.value(), index, opts),
+            out, err, opts);
+    }
+    if (args.calls_symbol.has_value()) {
+        const std::vector<features::FunctionBody> bodies =
+            build_function_bodies(file, object, index, decode_options_for(object, args));
+        const std::vector<binary::Symbol> matched = features::functions_calling(bodies, args.calls_symbol.value());
+        return write_rendered(
+            format::render_function_table("Functions calling " + args.calls_symbol.value() + " in " + source,
+                matched, index, opts),
+            out, err, opts);
+    }
+    if (args.contains_string.has_value()) {
+        const std::vector<features::FunctionBody> bodies =
+            build_function_bodies(file, object, index, decode_options_for(object, args));
+        const std::vector<binary::Symbol> matched =
+            features::functions_containing_string(bodies, args.contains_string.value());
+        return write_rendered(
+            format::render_function_table("Functions referencing \"" + args.contains_string.value() + "\" in " + source,
+                matched, index, opts),
+            out, err, opts);
+    }
+    return write_rendered(format::render_function_list(file.view(), index, opts), out, err, opts);
+}
+
+int run_xrefs(
+    const binary::BinaryFile& file,
+    const binary::Object& object,
+    const resolver::Index& index,
+    const Arguments& args,
+    const format::Options& opts,
+    std::ostream& out,
+    std::ostream& err)
+{
+    const std::vector<features::FunctionBody> bodies =
+        build_function_bodies(file, object, index, decode_options_for(object, args));
+    const std::vector<features::Xref> xrefs = features::find_xrefs(bodies, args.xref_symbol.value());
+    return write_rendered(format::render_xrefs(xrefs, opts), out, err, opts);
+}
+
+int run_stats(
+    const binary::BinaryFile& file,
+    const binary::Object& object,
+    const resolver::Index& index,
+    const Arguments& args,
+    const format::Options& opts,
+    std::ostream& out,
+    std::ostream& err)
+{
+    std::vector<features::FunctionBody> bodies =
+        build_function_bodies(file, object, index, decode_options_for(object, args));
+    if (args.symbol.has_value()) {
+        std::vector<features::FunctionBody> selected;
+        for (features::FunctionBody& body : bodies) {
+            if (body.symbol.name == args.symbol.value() || body.symbol.raw_name == args.symbol.value()) {
+                selected.push_back(std::move(body));
+            }
+        }
+        bodies.swap(selected);
+    }
+    const std::vector<features::FunctionStats> stats = features::compute_stats(bodies);
+    return write_rendered(format::render_stats(stats, opts), out, err, opts);
 }
 
 } // namespace
@@ -476,7 +588,7 @@ int run(const Arguments& args, std::ostream& out, std::ostream& err)
 
     switch (args.action) {
     case Action::ListFunctions:
-        return write_rendered(format::render_function_list(file.view(), index.value(), opts), out, err, opts);
+        return run_list(file, *object, index.value(), args, opts, out, err);
     case Action::DisassembleSymbol:
         return run_disassemble_symbol(file, *object, index.value(), args, opts, out, err);
     case Action::DisassembleSection:
@@ -484,9 +596,11 @@ int run(const Arguments& args, std::ostream& out, std::ostream& err)
     case Action::DisassembleAll:
         return run_disassemble_all(file, *object, index.value(), args, opts, out, err);
     case Action::ShowXrefs:
+        return run_xrefs(file, *object, index.value(), args, opts, out, err);
     case Action::ShowStats:
+        return run_stats(file, *object, index.value(), args, opts, out, err);
     case Action::Watch:
-        write_error(err, Error{ErrorCode::Internal, "this workflow is being wired up", 0, false}, opts);
+        write_error(err, Error{ErrorCode::Internal, "watch mode is being wired up", 0, false}, opts);
         return exit_disasm_error;
     case Action::ShowHelp:
     case Action::ShowVersion:
