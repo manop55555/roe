@@ -21,3 +21,12 @@ crash-*
 id:*
 scratch/*
 !scratch/.gitkeep
+
+# libFuzzer-generated corpus entries (hash-named); keep only the checked-in seeds
+fuzz/corpus/**
+!fuzz/corpus/
+!fuzz/corpus/*/
+!fuzz/corpus/elf_parser/elf32_be_exec_min.bin
+!fuzz/corpus/elf_parser/elf64_le_relocatable_min.bin
+!fuzz/corpus/elf_parser/elf_magic_only.bin
+!fuzz/corpus/elf_parser/not_elf.txt
