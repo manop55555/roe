@@ -1,12 +1,21 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The roe Authors
+
 #include "roe/disasm.hpp"
 
 #include <capstone/capstone.h>
+#include <capstone/arm.h>
+#include <capstone/arm64.h>
+#include <capstone/mips.h>
+#include <capstone/ppc.h>
+#include <capstone/riscv.h>
 #include <capstone/x86.h>
 
 #include <algorithm>
 #include <cstddef>
 #include <iterator>
 #include <limits>
+#include <string_view>
 #include <utility>
 
 namespace roe::disasm {
@@ -85,14 +94,80 @@ private:
     std::size_t count_{0};
 };
 
-Result<CapstoneHandle> open_engine(const Options& options) {
-    if (options.architecture == Architecture::AArch64) {
-        return Result<CapstoneHandle>::err(
-            {ErrorCode::UnsupportedFormat, "AArch64 disassembly is not implemented yet"});
+enum class Family { X86, Arm, Arm64, Mips, Ppc, RiscV };
+
+Family family_of(Architecture architecture) noexcept {
+    switch (architecture) {
+    case Architecture::X86:
+    case Architecture::X86_64:
+        return Family::X86;
+    case Architecture::Arm:
+    case Architecture::ArmThumb:
+        return Family::Arm;
+    case Architecture::AArch64:
+        return Family::Arm64;
+    case Architecture::RiscV32:
+    case Architecture::RiscV64:
+        return Family::RiscV;
+    case Architecture::Mips32:
+    case Architecture::Mips32el:
+    case Architecture::Mips64:
+    case Architecture::Mips64el:
+        return Family::Mips;
+    case Architecture::PowerPc32:
+    case Architecture::PowerPc64:
+    case Architecture::PowerPc64le:
+        return Family::Ppc;
     }
+    return Family::X86;
+}
+
+struct EngineConfig {
+    cs_arch arch{CS_ARCH_X86};
+    cs_mode mode{CS_MODE_64};
+};
+
+cs_mode combine_mode(unsigned value) noexcept { return static_cast<cs_mode>(value); }
+
+EngineConfig config_for(Architecture architecture) noexcept {
+    switch (architecture) {
+    case Architecture::X86:
+        return {CS_ARCH_X86, CS_MODE_32};
+    case Architecture::X86_64:
+        return {CS_ARCH_X86, CS_MODE_64};
+    case Architecture::Arm:
+        return {CS_ARCH_ARM, CS_MODE_ARM};
+    case Architecture::ArmThumb:
+        return {CS_ARCH_ARM, CS_MODE_THUMB};
+    case Architecture::AArch64:
+        return {CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN};
+    case Architecture::RiscV32:
+        return {CS_ARCH_RISCV, combine_mode(CS_MODE_RISCV32 | CS_MODE_RISCVC)};
+    case Architecture::RiscV64:
+        return {CS_ARCH_RISCV, combine_mode(CS_MODE_RISCV64 | CS_MODE_RISCVC)};
+    case Architecture::Mips32:
+        return {CS_ARCH_MIPS, combine_mode(CS_MODE_MIPS32 | CS_MODE_BIG_ENDIAN)};
+    case Architecture::Mips32el:
+        return {CS_ARCH_MIPS, combine_mode(CS_MODE_MIPS32 | CS_MODE_LITTLE_ENDIAN)};
+    case Architecture::Mips64:
+        return {CS_ARCH_MIPS, combine_mode(CS_MODE_MIPS64 | CS_MODE_BIG_ENDIAN)};
+    case Architecture::Mips64el:
+        return {CS_ARCH_MIPS, combine_mode(CS_MODE_MIPS64 | CS_MODE_LITTLE_ENDIAN)};
+    case Architecture::PowerPc32:
+        return {CS_ARCH_PPC, combine_mode(CS_MODE_32 | CS_MODE_BIG_ENDIAN)};
+    case Architecture::PowerPc64:
+        return {CS_ARCH_PPC, combine_mode(CS_MODE_64 | CS_MODE_BIG_ENDIAN)};
+    case Architecture::PowerPc64le:
+        return {CS_ARCH_PPC, combine_mode(CS_MODE_64 | CS_MODE_LITTLE_ENDIAN)};
+    }
+    return {CS_ARCH_X86, CS_MODE_64};
+}
+
+Result<CapstoneHandle> open_engine(const Options& options) {
+    const EngineConfig config = config_for(options.architecture);
 
     csh raw_handle = 0;
-    const cs_err open_result = cs_open(CS_ARCH_X86, CS_MODE_64, &raw_handle);
+    const cs_err open_result = cs_open(config.arch, config.mode, &raw_handle);
     if (open_result != CS_ERR_OK) {
         return Result<CapstoneHandle>::err(
             {ErrorCode::Disassembly, std::string("failed to open Capstone engine: ") + cs_strerror(open_result)});
@@ -105,7 +180,7 @@ Result<CapstoneHandle> open_engine(const Options& options) {
             {ErrorCode::Disassembly, std::string("failed to enable Capstone details: ") + cs_strerror(detail_result)});
     }
 
-    if (options.syntax == Syntax::Att) {
+    if (options.syntax == Syntax::Att && family_of(options.architecture) == Family::X86) {
         const cs_err syntax_result = cs_option(handle.get(), CS_OPT_SYNTAX, CS_OPT_SYNTAX_ATT);
         if (syntax_result != CS_ERR_OK) {
             return Result<CapstoneHandle>::err(
@@ -120,50 +195,112 @@ Result<CapstoneHandle> open_engine(const Options& options) {
     if (instruction.detail == nullptr) {
         return false;
     }
-
     for (std::uint8_t index = 0; index < instruction.detail->groups_count; ++index) {
         if (instruction.detail->groups[index] == group) {
             return true;
         }
     }
-
     return false;
 }
 
-[[nodiscard]] bool first_x86_operand_is_immediate(const cs_insn& instruction) noexcept {
-    if (instruction.detail == nullptr) {
-        return false;
-    }
-
-    const cs_x86& x86 = instruction.detail->x86;
-    return x86.op_count > 0 && x86.operands[0].type == X86_OP_IMM;
-}
-
-[[nodiscard]] std::optional<std::uint64_t> direct_x86_target(const cs_insn& instruction) noexcept {
-    if (!first_x86_operand_is_immediate(instruction)) {
+// Extract the first immediate operand of a branch instruction. Capstone reports
+// relative branch targets as absolute addresses across every supported ISA, so a
+// branch's first immediate operand is its target.
+[[nodiscard]] std::optional<std::uint64_t> direct_target(Architecture architecture, const cs_insn& in) noexcept {
+    if (in.detail == nullptr) {
         return std::nullopt;
     }
+    const auto as_u64 = [](std::int64_t value) noexcept { return static_cast<std::uint64_t>(value); };
 
-    const std::int64_t target = instruction.detail->x86.operands[0].imm;
-    return static_cast<std::uint64_t>(target);
+    switch (family_of(architecture)) {
+    case Family::X86: {
+        const cs_x86& detail = in.detail->x86;
+        for (std::uint8_t i = 0; i < detail.op_count; ++i) {
+            if (detail.operands[i].type == X86_OP_IMM) {
+                return as_u64(detail.operands[i].imm);
+            }
+        }
+        break;
+    }
+    case Family::Arm: {
+        const cs_arm& detail = in.detail->arm;
+        for (std::uint8_t i = 0; i < detail.op_count; ++i) {
+            if (detail.operands[i].type == ARM_OP_IMM) {
+                return as_u64(static_cast<std::int64_t>(detail.operands[i].imm));
+            }
+        }
+        break;
+    }
+    case Family::Arm64: {
+        const cs_arm64& detail = in.detail->arm64;
+        for (std::uint8_t i = 0; i < detail.op_count; ++i) {
+            if (detail.operands[i].type == ARM64_OP_IMM) {
+                return as_u64(detail.operands[i].imm);
+            }
+        }
+        break;
+    }
+    case Family::Mips: {
+        const cs_mips& detail = in.detail->mips;
+        for (std::uint8_t i = 0; i < detail.op_count; ++i) {
+            if (detail.operands[i].type == MIPS_OP_IMM) {
+                return as_u64(detail.operands[i].imm);
+            }
+        }
+        break;
+    }
+    case Family::Ppc: {
+        const cs_ppc& detail = in.detail->ppc;
+        for (std::uint8_t i = 0; i < detail.op_count; ++i) {
+            if (detail.operands[i].type == PPC_OP_IMM) {
+                return as_u64(detail.operands[i].imm);
+            }
+        }
+        break;
+    }
+    case Family::RiscV: {
+        const cs_riscv& detail = in.detail->riscv;
+        for (std::uint8_t i = 0; i < detail.op_count; ++i) {
+            if (detail.operands[i].type == RISCV_OP_IMM) {
+                // Capstone reports RISC-V branch/jump immediates as PC-relative
+                // offsets, unlike the absolute targets it produces for other ISAs.
+                return in.address + as_u64(detail.operands[i].imm);
+            }
+        }
+        break;
+    }
+    }
+    return std::nullopt;
 }
 
-[[nodiscard]] BranchKind classify_x86_branch(const cs_insn& instruction) noexcept {
+[[nodiscard]] bool is_unconditional_jump(Architecture architecture, const cs_insn& in) noexcept {
+    if (family_of(architecture) == Family::X86) {
+        return in.id == X86_INS_JMP;
+    }
+    // Capstone emits the bare unconditional-branch mnemonic for these ISAs; any
+    // conditional form carries a suffix (b.eq, beq, bdnz, ...) and will not match.
+    const std::string_view mnemonic{in.mnemonic};
+    return mnemonic == "b" || mnemonic == "j" || mnemonic == "ba";
+}
+
+[[nodiscard]] BranchKind classify_branch(Architecture architecture, const cs_insn& instruction) noexcept {
     if (has_group(instruction, CS_GRP_RET) || has_group(instruction, CS_GRP_IRET)) {
         return BranchKind::Return;
     }
 
+    const bool has_target = direct_target(architecture, instruction).has_value();
+
     if (has_group(instruction, CS_GRP_CALL)) {
-        return first_x86_operand_is_immediate(instruction) ? BranchKind::Call : BranchKind::IndirectCall;
+        return has_target ? BranchKind::Call : BranchKind::IndirectCall;
     }
 
     if (has_group(instruction, CS_GRP_JUMP)) {
-        if (instruction.id == X86_INS_JMP) {
-            return first_x86_operand_is_immediate(instruction)
-                ? BranchKind::UnconditionalJump
-                : BranchKind::IndirectJump;
+        if (!has_target) {
+            return BranchKind::IndirectJump;
         }
-        return BranchKind::ConditionalJump;
+        return is_unconditional_jump(architecture, instruction)
+            ? BranchKind::UnconditionalJump
+            : BranchKind::ConditionalJump;
     }
 
     return BranchKind::None;
@@ -288,6 +425,62 @@ Result<CapstoneHandle> open_engine(const Options& options) {
 
 } // namespace
 
+Result<Options> options_for(binary::Architecture architecture, Syntax syntax) {
+    Options options;
+    options.syntax = syntax;
+    options.resolve_branch_targets = true;
+
+    switch (architecture) {
+    case binary::Architecture::X86:
+        options.architecture = Architecture::X86;
+        break;
+    case binary::Architecture::X86_64:
+        options.architecture = Architecture::X86_64;
+        break;
+    case binary::Architecture::Arm:
+        options.architecture = Architecture::Arm;
+        break;
+    case binary::Architecture::ArmThumb:
+        options.architecture = Architecture::ArmThumb;
+        break;
+    case binary::Architecture::AArch64:
+        options.architecture = Architecture::AArch64;
+        break;
+    case binary::Architecture::RiscV32:
+        options.architecture = Architecture::RiscV32;
+        break;
+    case binary::Architecture::RiscV64:
+        options.architecture = Architecture::RiscV64;
+        break;
+    case binary::Architecture::Mips32:
+        options.architecture = Architecture::Mips32;
+        break;
+    case binary::Architecture::Mips32el:
+        options.architecture = Architecture::Mips32el;
+        break;
+    case binary::Architecture::Mips64:
+        options.architecture = Architecture::Mips64;
+        break;
+    case binary::Architecture::Mips64el:
+        options.architecture = Architecture::Mips64el;
+        break;
+    case binary::Architecture::PowerPc32:
+        options.architecture = Architecture::PowerPc32;
+        break;
+    case binary::Architecture::PowerPc64:
+        options.architecture = Architecture::PowerPc64;
+        break;
+    case binary::Architecture::PowerPc64le:
+        options.architecture = Architecture::PowerPc64le;
+        break;
+    case binary::Architecture::Unknown:
+        return Result<Options>::err(
+            {ErrorCode::UnsupportedFormat, "cannot disassemble an unknown architecture"});
+    }
+
+    return Result<Options>::ok(options);
+}
+
 Result<std::vector<Instruction>> disassemble_bytes(CodeBuffer code, const Options& options) {
     const auto distance = std::distance(code.begin, code.end);
     if (distance < 0) {
@@ -343,9 +536,9 @@ Result<std::vector<Instruction>> disassemble_bytes(CodeBuffer code, const Option
         instruction.bytes.assign(raw.bytes, raw.bytes + raw.size);
         instruction.mnemonic = raw.mnemonic;
         instruction.operands = raw.op_str;
-        instruction.branch_kind = classify_x86_branch(raw);
+        instruction.branch_kind = classify_branch(options.architecture, raw);
         if (options.resolve_branch_targets && is_branch(instruction.branch_kind)) {
-            instruction.branch_target = direct_x86_target(raw);
+            instruction.branch_target = direct_target(options.architecture, raw);
         }
         instructions.push_back(std::move(instruction));
     }
@@ -357,16 +550,6 @@ Result<std::vector<Instruction>> disassemble_function(
     const elf::File& file,
     const elf::Symbol& symbol,
     const Options& options) {
-    if (file.machine == elf::Machine::AArch64 || options.architecture == Architecture::AArch64) {
-        return Result<std::vector<Instruction>>::err(
-            {ErrorCode::UnsupportedFormat, "AArch64 disassembly is not implemented yet"});
-    }
-
-    if (file.machine != elf::Machine::X86_64) {
-        return Result<std::vector<Instruction>>::err(
-            {ErrorCode::UnsupportedFormat, "only x86-64 ELF disassembly is implemented"});
-    }
-
     Result<CodeBuffer> buffer = buffer_for_function(file, symbol);
     if (!buffer) {
         return Result<std::vector<Instruction>>::err(buffer.error());
@@ -384,16 +567,6 @@ Result<std::vector<Instruction>> disassemble_section(
     const elf::File& file,
     const elf::Section& section,
     const Options& options) {
-    if (file.machine == elf::Machine::AArch64 || options.architecture == Architecture::AArch64) {
-        return Result<std::vector<Instruction>>::err(
-            {ErrorCode::UnsupportedFormat, "AArch64 disassembly is not implemented yet"});
-    }
-
-    if (file.machine != elf::Machine::X86_64) {
-        return Result<std::vector<Instruction>>::err(
-            {ErrorCode::UnsupportedFormat, "only x86-64 ELF disassembly is implemented"});
-    }
-
     if (!section.executable) {
         return Result<std::vector<Instruction>>::err(
             {ErrorCode::UnsupportedFormat, "section is not marked executable"});
@@ -405,6 +578,63 @@ Result<std::vector<Instruction>> disassemble_section(
     }
 
     return disassemble_bytes(buffer.value(), options);
+}
+
+Result<std::vector<Instruction>> disassemble_section(
+    const binary::SectionBytes& section,
+    const Options& options) {
+    if (section.bytes.empty()) {
+        return Result<std::vector<Instruction>>::ok({});
+    }
+    CodeBuffer code{section.address, section.bytes.begin(), section.bytes.end()};
+    return disassemble_bytes(code, options);
+}
+
+Result<std::vector<Instruction>> disassemble_function(
+    const binary::BinaryFile& file,
+    const binary::Object& object,
+    const binary::Symbol& symbol,
+    const Options& options) {
+    const std::optional<binary::Section> section = [&]() -> std::optional<binary::Section> {
+        for (const binary::Section& candidate : object.sections) {
+            if (!candidate.executable || symbol.address < candidate.address) {
+                continue;
+            }
+            if (symbol.address - candidate.address < candidate.size) {
+                return candidate;
+            }
+        }
+        return std::nullopt;
+    }();
+
+    if (!section.has_value()) {
+        return Result<std::vector<Instruction>>::err(
+            {ErrorCode::NotFound, "function symbol is not contained in an executable section", symbol.address, true});
+    }
+
+    Result<binary::SectionBytes> section_bytes = file.section_bytes(*section);
+    if (!section_bytes) {
+        return Result<std::vector<Instruction>>::err(std::move(section_bytes).error());
+    }
+
+    const std::uint64_t delta = symbol.address - section->address;
+    binary::SectionBytes& owned = section_bytes.value();
+    if (delta > owned.bytes.size()) {
+        return Result<std::vector<Instruction>>::err(
+            {ErrorCode::MalformedInput, "function symbol starts past the end of its section", symbol.address, true});
+    }
+    const std::uint64_t available = owned.bytes.size() - delta;
+    const std::uint64_t requested = symbol.size == 0 ? available : std::min(symbol.size, available);
+
+    std::vector<std::uint8_t> window(
+        owned.bytes.begin() + static_cast<std::ptrdiff_t>(delta),
+        owned.bytes.begin() + static_cast<std::ptrdiff_t>(delta + requested));
+    CodeBuffer code{symbol.address, window.begin(), window.end()};
+    Result<std::vector<Instruction>> instructions = disassemble_bytes(code, options);
+    if (!instructions || symbol.size != 0) {
+        return instructions;
+    }
+    return Result<std::vector<Instruction>>::ok(trim_after_first_terminal(std::move(instructions).value()));
 }
 
 bool is_branch(BranchKind kind) noexcept {

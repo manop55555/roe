@@ -105,14 +105,41 @@ int disassembly_exit_for(const ErrorCode code) noexcept
     }
 }
 
+disasm::Architecture architecture_for(const elf::File& file) noexcept
+{
+    const bool big = file.endianness == elf::Endianness::Big;
+    const bool elf64 = file.elf_class == elf::Class::Elf64;
+    switch (file.machine) {
+    case elf::Machine::X86:
+        return disasm::Architecture::X86;
+    case elf::Machine::X86_64:
+        return disasm::Architecture::X86_64;
+    case elf::Machine::Arm:
+        return disasm::Architecture::Arm;
+    case elf::Machine::AArch64:
+        return disasm::Architecture::AArch64;
+    case elf::Machine::RiscV:
+        return elf64 ? disasm::Architecture::RiscV64 : disasm::Architecture::RiscV32;
+    case elf::Machine::Mips:
+        if (elf64) {
+            return big ? disasm::Architecture::Mips64 : disasm::Architecture::Mips64el;
+        }
+        return big ? disasm::Architecture::Mips32 : disasm::Architecture::Mips32el;
+    case elf::Machine::PowerPc:
+        return disasm::Architecture::PowerPc32;
+    case elf::Machine::PowerPc64:
+        return big ? disasm::Architecture::PowerPc64 : disasm::Architecture::PowerPc64le;
+    case elf::Machine::Unknown:
+    case elf::Machine::Other:
+        break;
+    }
+    return disasm::Architecture::X86_64;
+}
+
 disasm::Options disasm_options_for(const elf::File& file) noexcept
 {
     disasm::Options options;
-    if (file.machine == elf::Machine::AArch64) {
-        options.architecture = disasm::Architecture::AArch64;
-    } else {
-        options.architecture = disasm::Architecture::X86_64;
-    }
+    options.architecture = architecture_for(file);
     options.syntax = disasm::Syntax::Intel;
     options.resolve_branch_targets = true;
     return options;
