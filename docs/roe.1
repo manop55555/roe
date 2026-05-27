@@ -1,0 +1,288 @@
+.TH roe 1 "2026" "roe 1.0.0" "User Commands"
+.SH NAME
+roe \- a disassembler fit for humans
+.SH SYNOPSIS
+.B roe
+.I file
+.br
+.B roe
+.I file symbol
+.RI [ options ]
+.br
+.B roe
+.I file
+.B \-\-section
+.I name
+.RI [ options ]
+.br
+.B roe
+.I file
+.RB { \-\-all | \-D }
+.RI [ options ]
+.br
+.B roe
+.B \-\-completions
+.I shell
+.br
+.B roe
+.RB { \-\-help | \-h }
+.RI [ topic ]
+.br
+.B roe
+.RB { \-\-version | \-V }
+.SH DESCRIPTION
+.B roe
+is a command\-line disassembler that aims to make machine code readable by
+people rather than only by other tools. It reads an object file, executable,
+shared library, or static archive member, disassembles it with the Capstone
+engine, and prints output that preserves addresses, resolves symbols and
+relocations to their names, labels branch targets, and previews the
+destinations of in\-function jumps and calls inline. Raw instruction bytes are
+hidden by default and shown only on request.
+.PP
+With no symbol argument,
+.B roe
+lists the functions discovered in
+.IR file .
+Given a symbol, it disassembles that single function with cross\-function calls
+resolved to symbol names, relocations annotated inline by name, and local
+branches rewritten as readable labels. ELF input is fully supported;
+Mach\-O, PE, and archive containers are recognized.
+.PP
+The tool was prompted by Linus Torvalds in the Linux kernel mailing list
+thread
+.RB \(lq "odd objtool \(aqunreachable instruction\(aq warning" \(rq
+(29 October 2025), where he observed that
+.BR objdump (1)
+flags are hard to remember, that its output trades readability against
+information, that relocations are printed as raw addresses instead of symbol
+names, and that there is no way to preview the target of a jump or call. His
+summary was that the output is
+.RB \(lq "not fit for humans" \(rq .
+The name
+.B roe
+and this manual are a direct response to that complaint.
+.SH OPTIONS
+.TP
+.B \-\-all ", " \-D
+Disassemble every executable section instead of listing functions.
+.TP
+.BI \-\-arch " name"
+Override the detected architecture. Useful for code the container cannot
+disambiguate, for example
+.B thumb
+or
+.BR riscv64 .
+.TP
+.BI \-\-calls " symbol"
+List only the functions that call or branch to
+.IR symbol .
+.TP
+.BI \-\-completions " shell"
+Emit a shell completion script to standard output and exit. The argument is
+one of
+.BR bash ", " zsh ", " fish ", or " powershell .
+.TP
+.BI \-\-contains " string"
+List only the functions whose body references the given
+.IR string .
+.TP
+.BI \-\-grep " regex"
+List only the functions whose name matches the given regular expression.
+.TP
+.B \-\-help ", " \-h " [\fItopic\fP]"
+Show help and exit. An optional
+.I topic
+selects a focused page; topics are
+.BR usage ", " formats ", " arches ", " examples ", " config ", and " json .
+.TP
+.B \-\-json
+Emit machine\-readable JSON instead of formatted text. Combine with
+.B \-\-no\-color
+when piping to other programs.
+.TP
+.B \-\-no\-color
+Disable ANSI color in the output, as for pipes and log files. Color is also
+disabled when the
+.B NO_COLOR
+environment variable is set.
+.TP
+.B \-\-no\-pager
+Do not page long output through the pager. Paging is also disabled when the
+.B NO_PAGER
+environment variable is set or when output is not a terminal.
+.TP
+.BI \-\-section " name"
+Disassemble the named section, for example
+.IR .text ", instead of listing functions."
+.TP
+.B \-\-show\-bytes
+Show the raw instruction bytes alongside each instruction. Bytes are hidden
+by default.
+.TP
+.B \-\-source
+Interleave source lines drawn from debug information with the disassembly.
+.TP
+.B \-\-stats
+Print per\-function statistics: size, basic block count, branch count, and
+nesting depth.
+.TP
+.B \-\-version ", " \-V
+Show the version together with build information, supported architectures,
+and recognized formats, then exit.
+.TP
+.B \-\-watch
+Re\-run automatically whenever the input file changes on disk.
+.TP
+.BI \-\-xref " symbol"
+Show every call site of
+.IR symbol .
+.SH EXAMPLES
+.PP
+List the functions in a binary:
+.PP
+.RS 4
+.EX
+roe vmlinux.o
+.EE
+.RE
+.PP
+Disassemble a single function with resolved symbols, labeled branches, and
+inline previews:
+.PP
+.RS 4
+.EX
+roe vmlinux.o handle_mm_fault
+.EE
+.RE
+.PP
+Disassemble a named section:
+.PP
+.RS 4
+.EX
+roe a.out \-\-section .text
+.EE
+.RE
+.PP
+Disassemble every executable section:
+.PP
+.RS 4
+.EX
+roe a.out \-\-all
+.EE
+.RE
+.PP
+Emit JSON and post\-process it with
+.BR jq (1):
+.PP
+.RS 4
+.EX
+roe a.out main \-\-json \-\-no\-color | jq .
+.EE
+.RE
+.PP
+Find C++ methods by matching the function names against a regular expression:
+.PP
+.RS 4
+.EX
+roe libfoo.so \-\-grep \(aq::\(aq
+.EE
+.RE
+.PP
+Show every call site of a symbol:
+.PP
+.RS 4
+.EX
+roe a.out \-\-xref malloc
+.EE
+.RE
+.PP
+Report per\-function statistics:
+.PP
+.RS 4
+.EX
+roe a.out \-\-stats
+.EE
+.RE
+.PP
+Show raw instruction bytes for one function:
+.PP
+.RS 4
+.EX
+roe a.out main \-\-show\-bytes
+.EE
+.RE
+.PP
+Interleave source lines from debug information:
+.PP
+.RS 4
+.EX
+roe a.out main \-\-source
+.EE
+.RE
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Usage error, such as an unknown flag or a missing argument.
+.TP
+.B 2
+File or format error, such as a missing file or an unrecognized container.
+.TP
+.B 3
+Disassembly error, such as a failure in the disassembler or symbol resolver.
+.SH ENVIRONMENT
+.TP
+.B NO_COLOR
+When set to any value, disable ANSI color, as with
+.BR \-\-no\-color .
+.TP
+.B NO_PAGER
+When set to any value, disable the pager, as with
+.BR \-\-no\-pager .
+.TP
+.B PAGER
+The pager command used for long output. Defaults to
+.BR "less \-R" .
+.TP
+.B XDG_CONFIG_HOME
+Base directory for configuration. The configuration file is read from
+.IR $XDG_CONFIG_HOME/roe/config.toml ,
+defaulting to
+.I ~/.config/roe/config.toml
+when unset.
+.TP
+.B ROE_CONFIG
+Explicit path to the configuration file, overriding the search based on
+.BR XDG_CONFIG_HOME .
+.SH FILES
+.TP
+.I $XDG_CONFIG_HOME/roe/config.toml
+Per\-user configuration file on Linux. When
+.B XDG_CONFIG_HOME
+is unset the path is
+.IR ~/.config/roe/config.toml .
+On macOS the file is
+.I ~/Library/Application Support/roe/config.toml
+and on Windows it is
+.IR %APPDATA%\eroe\econfig.toml .
+The location can be overridden with the
+.B ROE_CONFIG
+environment variable.
+.SH SEE ALSO
+.BR objdump (1),
+.BR readelf (1),
+.BR nm (1),
+.BR addr2line (1)
+.SH BUGS
+Report bugs at
+.UR https://github.com/USER/roe
+the project issue tracker
+.UE .
+.SH AUTHORS
+The roe Authors.
+.SH COPYRIGHT
+Copyright 2026 The roe Authors. Licensed under the Apache License, Version 2.0
+.RB ( Apache\-2.0 ).
