@@ -4,6 +4,7 @@
 #include "roe/cli.hpp"
 
 #include "roe/binary.hpp"
+#include "roe/debug.hpp"
 #include "roe/disasm.hpp"
 #include "roe/features.hpp"
 #include "roe/format.hpp"
@@ -328,6 +329,36 @@ disasm::Options decode_options_for(const binary::Object& object, const Arguments
     return fallback;
 }
 
+// When --source is requested, load DWARF line info and attach source lines to the
+// annotated instructions. Emits a single info line to err when debug info is absent.
+void attach_source(
+    const binary::BinaryFile& file,
+    const Arguments& args,
+    std::vector<resolver::AnnotatedInstruction>& annotated,
+    std::ostream& err)
+{
+    if (!args.source) {
+        return;
+    }
+    Result<debug::SourceMap> map = debug::load_source_map(file, 0);
+    if (!map) {
+        return;
+    }
+    if (!map.value().fallback_message.empty()) {
+        err << "info: " << map.value().fallback_message << "\n";
+        return;
+    }
+    for (resolver::AnnotatedInstruction& entry : annotated) {
+        const std::optional<debug::SourceLocation> location =
+            debug::source_at(map.value(), entry.instruction.address);
+        if (location.has_value()) {
+            entry.source_text = location->text;
+            entry.source_line = location->line;
+            entry.source_path = location->path;
+        }
+    }
+}
+
 int run_disassemble_symbol(
     const binary::BinaryFile& file,
     const binary::Object& object,
@@ -355,6 +386,7 @@ int run_disassemble_symbol(
 
     std::vector<resolver::AnnotatedInstruction> annotated = resolver::annotate(index, decoded.value());
     annotated = features::annotate_string_references(object, annotated);
+    attach_source(file, args, annotated, err);
     return write_rendered(render_annotated(annotated, args, opts), out, err, opts);
 }
 
@@ -388,6 +420,7 @@ int run_disassemble_section(
 
     std::vector<resolver::AnnotatedInstruction> annotated = resolver::annotate(index, decoded.value());
     annotated = features::annotate_string_references(object, annotated);
+    attach_source(file, args, annotated, err);
     return write_rendered(render_annotated(annotated, args, opts), out, err, opts);
 }
 

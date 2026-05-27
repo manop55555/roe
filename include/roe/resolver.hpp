@@ -74,6 +74,9 @@ struct AnnotatedInstruction {
     std::optional<ResolvedReference> reference;
     std::optional<ResolvedSymbol> branch_target_symbol;
     std::optional<binary::StringLiteral> string_reference;
+    std::optional<std::string> source_text; ///< Source line text for --source, when available.
+    std::uint32_t source_line{0};            ///< 1-based source line number, 0 if unknown.
+    std::string source_path;                 ///< Source file path, empty if unknown.
 };
 
 /**

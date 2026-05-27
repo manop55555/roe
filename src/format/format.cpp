@@ -583,9 +583,28 @@ Result<std::string> render_disassembly(
 {
     const std::map<std::uint64_t, std::string> labels = build_labels(instructions);
     std::ostringstream out;
+    std::string last_source_key;
 
     for (const resolver::AnnotatedInstruction& annotated : instructions) {
         const disasm::Instruction& instruction = annotated.instruction;
+
+        if (options.source && annotated.source_line != 0U) {
+            const std::string key = annotated.source_path + ":" + std::to_string(annotated.source_line);
+            if (key != last_source_key) {
+                last_source_key = key;
+                const auto slash = annotated.source_path.find_last_of('/');
+                const std::string file = slash == std::string::npos ? annotated.source_path
+                                                                    : annotated.source_path.substr(slash + 1);
+                std::string head = "; " + (file.empty() ? std::string("source") : file) + ":"
+                    + std::to_string(annotated.source_line);
+                out << colorize(head, ansi_dim, options);
+                if (annotated.source_text.has_value() && !annotated.source_text->empty()) {
+                    out << "  " << annotated.source_text.value();
+                }
+                out << "\n";
+            }
+        }
+
         const auto label = labels.find(instruction.address);
         if (label != labels.end()) {
             out << colorize(label->second, ansi_yellow, options) << ":\n";
