@@ -1,170 +1,234 @@
-# roe
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+# roe — a disassembler fit for humans
 
-`roe` is a disassembler fit for humans: it preserves addresses, resolves symbols and relocations, labels branch targets, previews in-function jumps inline, and keeps raw instruction bytes off by default.
+```
+roe v1.0.0 — a disassembler fit for humans
 
-## Build
+           (             )
+            `--(_   _)--'
+                 Y-Y
+                /@@ \
+               /     \
+               `--'.  \             ,
+                   |   `.__________/)
 
-```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j
-./build/roe --version
+resolve relocations · preview branch targets · clean output
 ```
 
-Install locally:
+`roe` is a command-line disassembler for **ELF, Mach-O, PE/COFF, and static
+archive** binaries that aims to be readable by default. Point it at a binary and
+a function name; it resolves relocations to symbol names, previews where each
+branch goes, labels jump targets, and annotates string references — without a
+wall of unmemorable flags.
 
-```sh
-sudo install -m 0755 build/roe /usr/local/bin/roe
+## Why
+
+On the LKML thread *"odd objtool 'unreachable instruction' warning"* (29 Oct
+2025), Linus Torvalds laid out why `objdump` is painful to read:
+
+1. the flags are unmemorable;
+2. they trade off readability against information;
+3. **relocations show up as raw addresses, not symbol names** — *"objdump output
+   is just horrendous, not fit for humans"*;
+4. there is no way to preview a jump or call target without scrolling; and
+5. nobody had built a general-purpose CLI alternative.
+
+`roe` is that alternative. It is general-purpose: it works on any ELF, Mach-O,
+PE, or static archive — not just `vmlinux.o`.
+
+## The difference
+
+Disassembling `main`, which loads a format string and calls `printf`:
+
+**objdump**
+
+```
+000000000000119c <main>:
+    119c:	sub    $0x8,%rsp
+    11a5:	call   1160 <compute>
+    11ac:	lea    0xe51(%rip),%rdi        # 2004 <_IO_stdin_used+0x4>
+    11b8:	call   1030 <printf@plt>
+    11c6:	ret
 ```
 
-## Usage
+**roe**
 
-```sh
-roe <file>
-roe <file> <symbol> [--no-color] [--show-bytes] [--json]
-roe <file> --section <name> [--no-color] [--show-bytes] [--json]
-roe --help
-roe --version
+```
+0x000000000000119c: sub rsp, 8  ; sym main
+0x00000000000011a5: call compute  ; @0x1160
+0x00000000000011ac: lea rdi, [rip + 0xe51]  ; "compute(20) = %d\n"
+0x00000000000011b8: call printf@plt  ; @0x1030
+0x00000000000011c6: ret
 ```
 
-Exit codes are `0` for success, `1` for usage errors, `2` for file or ELF input errors, and `3` for disassembly or resolver errors.
+objdump points the `lea` at `# 2004 <_IO_stdin_used+0x4>` — a raw address. `roe`
+shows the **actual string** the code loads: `"compute(20) = %d\n"`.
 
-## Examples
+## Branch previews and labels
 
-Build the example binaries from source:
-
-```sh
-mkdir -p scratch/readme-demo
-cc -g -O0 tests/fixtures/call_targets.c -o scratch/readme-demo/test
-cc -g -O0 -fno-inline -fno-omit-frame-pointer -rdynamic tests/fixtures/branch_calls.c -o scratch/readme-demo/branch_calls
-cc -g -O0 -fno-inline -fno-omit-frame-pointer -fPIC -c tests/fixtures/relocations.c -o scratch/readme-demo/relocations.o
 ```
-
-List functions:
-
-```sh
-./build/roe scratch/readme-demo/test --no-color
-```
-
-```text
-Functions in scratch/readme-demo/test
-0x0000000000001000         0  _init
-0x0000000000001050        34  _start
-0x0000000000001080         0  deregister_tm_clones
-0x00000000000010b0         0  register_tm_clones
-0x00000000000010f0         0  __do_global_dtors_aux
-0x0000000000001130         0  frame_dummy
-0x0000000000001139        14  helper
-0x0000000000001147        80  main
-0x0000000000001198         0  _fini
-```
-
-Disassemble `main` with symbolized cross-function calls and in-function branch previews:
-
-```sh
-./build/roe scratch/readme-demo/test main --no-color
-```
-
-```text
-0x0000000000001147: push rbp  ; sym main
-0x0000000000001148: mov rbp, rsp
-0x000000000000114b: sub rsp, 0x10
-0x000000000000114f: mov dword ptr [rbp - 4], edi
-0x0000000000001152: mov qword ptr [rbp - 0x10], rsi
-0x0000000000001156: cmp dword ptr [rbp - 4], 0
-0x000000000000115a: jns 0x1168 → [L1: mov eax, dword ptr [rbp - 4]]
-0x000000000000115c: mov eax, dword ptr [rbp - 4]
-0x000000000000115f: mov edi, eax
-0x0000000000001161: call helper  ; @0x1139
-0x0000000000001166: jmp 0x1195 → [L2: leave]
+$ roe ./demo compute
+0x0000000000001160: test edi, edi  ; sym compute
+0x0000000000001162: jle 0x1196 → [L2: mov eax, 0]
+0x0000000000001164: mov ecx, 1
+...
 L1:
-0x0000000000001168: mov eax, dword ptr [rbp - 4]
-0x000000000000116b: mov edi, eax
-0x000000000000116d: call helper  ; @0x1139
-0x0000000000001172: mov edx, eax
-0x0000000000001174: lea rax, [rip + 0xe89]
-0x000000000000117b: mov esi, edx
-0x000000000000117d: mov rdi, rax
-0x0000000000001180: mov eax, 0
-0x0000000000001185: call printf@plt  ; @0x1030
-0x000000000000118a: cmp qword ptr [rbp - 0x10], 0
-0x000000000000118f: sete al
-0x0000000000001192: movzx eax, al
+0x0000000000001180: lea esi, [rax + rcx]
+...
+0x0000000000001193: jne 0x1180 → [L1: lea esi, [rax + rcx]]
+0x0000000000001195: ret
 L2:
-0x0000000000001195: leave
-0x0000000000001196: ret
+0x0000000000001196: mov eax, 0
+0x000000000000119b: ret
 ```
 
-Show raw instruction bytes when requested:
+Every conditional branch shows its destination inline (`→ [L2: ...]`), and jump
+targets get short labels (`L1:`, `L2:`) so you can follow the control flow
+without scrolling or doing hex arithmetic.
+
+## Quick start
 
 ```sh
-./build/roe scratch/readme-demo/test main --show-bytes --no-color | sed -n '/call /p'
+# Build a tiny example
+cat > demo.c <<'EOF'
+#include <stdio.h>
+static int helper(int x) { return x * 3 + 1; }
+int compute(int n) {
+    int acc = 0;
+    for (int i = 0; i < n; i++) { if (i & 1) acc += helper(i); else acc -= i; }
+    return acc;
+}
+int main(void) { printf("compute(20) = %d\n", compute(20)); return 0; }
+EOF
+cc -O1 -g -o demo demo.c
+
+roe demo                 # list functions
+roe demo main            # disassemble one function, resolved
+roe demo --section .text # disassemble a section
+roe demo --all           # every executable section
 ```
 
-```text
-0x0000000000001161: e8 d3 ff ff ff         call helper  ; @0x1139
-0x000000000000116d: e8 c7 ff ff ff         call helper  ; @0x1139
-0x0000000000001185: e8 a6 fe ff ff         call printf@plt  ; @0x1030
-```
-
-Emit JSON for tools:
+More:
 
 ```sh
-./build/roe scratch/readme-demo/test main --json --no-color | sed -n '1,14p'
+roe demo main --json | jq .       # machine-readable output
+roe demo main --source            # interleave source lines (needs -g)
+roe demo main --show-bytes        # include raw instruction bytes
+roe libfoo.so --grep '::'         # C++ methods, demangled
+roe demo --calls printf           # functions that call printf
+roe demo --xref printf            # every call site of printf
+roe demo --stats                  # per-function size/blocks/branches/depth
+roe demo main --watch             # re-run on every file change
 ```
 
-```json
-{
-  "instructions": [
-    {
-      "address": "0x1147",
-      "size": 1,
-      "bytes": [85],
-      "mnemonic": "push",
-      "operands": "rbp",
-      "label": null,
-      "branch_target": null,
-      "branch_preview": null,
-      "symbol": {"name":"main","raw_name":"main","address":"0x1147","size":80,"exact":true,"dynamic":false},
-      "reference": null
-    }
+`--stats` and `--xref`, for the example above:
+
+```
+$ roe demo --stats
+      size  blocks  branch  depth  function
+        43       1       2      0  main
+        60       5       2      2  compute
+
+$ roe demo --xref printf
+References to printf (1)
+0x00000000000011b8  main  call printf@plt
 ```
 
-## objdump Comparison
+## Features
 
-`objdump -dr` reports relocation information on separate lines after the instruction:
+- **Resolved relocations** — calls and data references show symbol names and
+  resolved strings, not raw offsets.
+- **Inline branch previews** (`je 0x35 → [L1: xor eax, eax]`) and **labels** at
+  jump targets.
+- **String-reference annotation** — `lea rdi, [rip + 0xe51]  ; "hello: %d\n"`.
+- **C++ (Itanium) and Rust (legacy + v0) demangling.**
+- **Source interleaving** (`--source`) from DWARF line info.
+- **Search/filter** — `--grep`, `--calls`, `--contains`; cross-references
+  (`--xref`); per-function statistics (`--stats`).
+- **JSON output** for every command (`--json`), documented in
+  [`docs/JSON_SCHEMA.md`](docs/JSON_SCHEMA.md).
+- **Watch mode** (`--watch`), a pager (`$PAGER`), and a config file
+  ([`docs/CONFIG.md`](docs/CONFIG.md)).
+- **Sane defaults**: addresses preserved, raw bytes off, color on a TTY, paged
+  when long. `NO_COLOR`, `NO_PAGER`, `--no-color`, `--no-pager` all respected.
 
-```text
-0000000000000000 <relocation_user>:
-   0:	55                   	push   %rbp
-   1:	48 89 e5             	mov    %rsp,%rbp
-   4:	48 83 ec 10          	sub    $0x10,%rsp
-   8:	89 7d fc             	mov    %edi,-0x4(%rbp)
-   b:	8b 45 fc             	mov    -0x4(%rbp),%eax
-   e:	89 c7                	mov    %eax,%edi
-  10:	e8 00 00 00 00       	call   15 <relocation_user+0x15>
-			11: R_X86_64_PLT32	external_function-0x4
-  15:	48 8b 15 00 00 00 00 	mov    0x0(%rip),%rdx        # 1c <relocation_user+0x1c>
-			18: R_X86_64_REX_GOTPCRELX	global_counter-0x4
-  1c:	8b 12                	mov    (%rdx),%edx
-  1e:	01 d0                	add    %edx,%eax
-  20:	c9                   	leave
-  21:	c3                   	ret
-```
+## Architecture and format support
 
-`roe` keeps addresses, hides raw bytes by default, previews the call target, and annotates relocations inline:
+Disassembly is backed by [Capstone](https://www.capstone-engine.org). All of
+these decode, classify branches, and resolve targets:
 
-```text
-0x0000000000000010: call 0x15 → [L1: mov rdx, qword ptr [rip]]  ; ref external_function @0x11
-L1:
-0x0000000000000015: mov rdx, qword ptr [rip]  ; ref global_counter @0x18
-```
+> x86, x86-64, ARM, Thumb, AArch64, RISC-V 32/64, MIPS 32/64 (LE/BE),
+> PowerPC 32/64 (LE/BE).
 
-## Validation
+**x86-64 and AArch64 are the fully verified, production targets** — real
+cross-compiled fixtures and every feature, including ARM64 ADRP+ADD string
+references. The others are supported and unit-tested against known encodings;
+ARM/Thumb mode is selected with `--arch thumb` when needed.
 
-Run the full local gate:
+This release **parses ELF**. Mach-O, PE/COFF, and static archives are detected
+by magic bytes and reported clearly rather than mis-parsed. The polymorphic
+`BinaryFile` interface (see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)) is in
+place so additional backends slot in without touching disasm, resolver, or
+output code.
+
+## Install
+
+**One-line script** (downloads a release binary, verifies its SHA-256):
 
 ```sh
-./scripts/ci.sh
+curl -fsSL https://raw.githubusercontent.com/USER/roe/main/install.sh | sh
 ```
 
-The v0.1.0 validation suite covers normal and sanitizer builds, generated C/C++ fixtures, `/usr/bin/ls`, `/usr/bin/ssh`, `/usr/bin/python3`, and an ELF parser libFuzzer harness.
+**From source** (needs CMake ≥ 3.16, a C++17 compiler, and Capstone ≥ 5):
+
+```sh
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+sudo cmake --install build --prefix /usr/local   # binary, man page, completions
+```
+
+**Docker:**
+
+```sh
+docker run --rm -v "$PWD:/data" ghcr.io/USER/roe /data/demo main
+```
+
+**Packages:** Debian/Ubuntu (`.deb`), Fedora/RHEL (`.rpm`), Arch (`PKGBUILD`),
+Alpine (`APKBUILD`), Nix, Homebrew, and Scoop manifests live in
+[`packaging/`](packaging/).
+
+**Shell completions:**
+
+```sh
+roe --completions bash > /etc/bash_completion.d/roe   # or zsh | fish | powershell
+```
+
+## Help
+
+```sh
+roe --help              # grouped flags, examples, and pointers
+roe --help arches       # focused topics: usage formats arches examples config json
+man roe                 # full manual
+roe --version           # version, build, Capstone version, arches, formats
+```
+
+> The repository placeholder `USER` in install/Docker/package commands is
+> substituted with the real GitHub owner at release time.
+
+## Documentation
+
+| Document | Contents |
+| --- | --- |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | modules, the `BinaryFile` interface, data flow |
+| [`docs/INTERFACES.md`](docs/INTERFACES.md) | the contract each module exposes |
+| [`docs/DECISIONS.md`](docs/DECISIONS.md) | one-line rationale per non-obvious decision |
+| [`docs/CONFIG.md`](docs/CONFIG.md) | every config key |
+| [`docs/JSON_SCHEMA.md`](docs/JSON_SCHEMA.md) | the stable JSON output schema |
+| [`docs/LICENSING.md`](docs/LICENSING.md) | project and dependency licenses |
+| [`SECURITY.md`](SECURITY.md) | threat model, fuzzing, reporting |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | how to contribute (DCO sign-off) |
+
+## License
+
+Apache-2.0. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE). Bundles Capstone
+(BSD-3-Clause); the test suite uses Catch2 (BSL-1.0).
