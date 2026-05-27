@@ -10,6 +10,7 @@
 #include "roe/format.hpp"
 #include "roe/resolver.hpp"
 #include "roe/version.hpp"
+#include "roe/watcher.hpp"
 
 #include <cstdlib>
 #include <memory>
@@ -38,16 +39,17 @@ bool no_color_env_set() noexcept
     return std::getenv("NO_COLOR") != nullptr;
 }
 
-format::Options format_options(const Arguments& parsed) noexcept
+format::Options format_options(const Arguments& parsed)
 {
+    const features::Config config = features::load_config();
     format::Options options = format::default_options();
     options.mode = parsed.json ? format::Mode::Json : format::Mode::Text;
     options.no_color_env = no_color_env_set();
-    options.color = !parsed.no_color && !options.no_color_env;
+    options.color = config.color && !parsed.no_color && !options.no_color_env;
     options.preserve_addresses = true;
-    options.show_bytes = parsed.show_bytes;
-    options.source = parsed.source;
-    options.pager = !parsed.no_pager;
+    options.show_bytes = config.show_bytes || parsed.show_bytes;
+    options.source = config.source || parsed.source;
+    options.pager = config.pager && !parsed.no_pager;
     return options;
 }
 
@@ -320,7 +322,9 @@ disasm::Options decode_options_for(const binary::Object& object, const Arguments
             architecture = *override;
         }
     }
-    Result<disasm::Options> options = disasm::options_for(architecture, disasm::Syntax::Intel);
+    const features::Config config = features::load_config();
+    const disasm::Syntax syntax = config.syntax == "att" ? disasm::Syntax::Att : disasm::Syntax::Intel;
+    Result<disasm::Options> options = disasm::options_for(architecture, syntax);
     if (options) {
         return options.value();
     }
@@ -579,7 +583,7 @@ int run_stats(
 
 } // namespace
 
-int run(const Arguments& args, std::ostream& out, std::ostream& err)
+int execute(const Arguments& args, std::ostream& out, std::ostream& err)
 {
     const format::Options opts = format_options(args);
 
@@ -633,8 +637,6 @@ int run(const Arguments& args, std::ostream& out, std::ostream& err)
     case Action::ShowStats:
         return run_stats(file, *object, index.value(), args, opts, out, err);
     case Action::Watch:
-        write_error(err, Error{ErrorCode::Internal, "watch mode is being wired up", 0, false}, opts);
-        return exit_disasm_error;
     case Action::ShowHelp:
     case Action::ShowVersion:
     case Action::ShowCompletions:
@@ -643,6 +645,30 @@ int run(const Arguments& args, std::ostream& out, std::ostream& err)
 
     write_error(err, usage_error("unsupported action"), opts);
     return exit_usage;
+}
+
+int run(const Arguments& args, std::ostream& out, std::ostream& err)
+{
+    if (args.watch && args.file.has_value()) {
+        Arguments once = args;
+        once.watch = false;
+        const format::Options opts = format_options(args);
+        const watcher::Options watch_options;
+        const Result<void> watched = watcher::watch_file(
+            args.file.value(), watch_options, [&](const watcher::Event&) {
+                if (opts.color) {
+                    out << "\033[2J\033[H"; // clear the screen between runs
+                }
+                static_cast<void>(execute(once, out, err));
+                out.flush();
+            });
+        if (!watched) {
+            write_error(err, watched.error(), opts);
+            return exit_usage;
+        }
+        return exit_ok;
+    }
+    return execute(args, out, err);
 }
 
 int main_entry(int argc, char** argv, std::ostream& out, std::ostream& err)

@@ -9,12 +9,40 @@
 #include "roe/resolver.hpp"
 
 #include <cstdint>
+#include <filesystem>
 #include <regex>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace roe::features {
+
+/**
+ * @brief Resolved configuration defaults (CLI flags always override these).
+ */
+struct Config {
+    bool color{true};
+    bool pager{true};
+    bool show_bytes{false};
+    bool source{false};
+    std::string syntax{"intel"};
+};
+
+/**
+ * @brief Resolve the configuration file path (ROE_CONFIG, then platform default).
+ */
+std::filesystem::path config_path();
+
+/**
+ * @brief Load configuration from the TOML config file; a missing file yields defaults.
+ */
+Config load_config();
+
+/**
+ * @brief Write text to stdout, paging through $PAGER when stdout is an interactive
+ *        terminal, paging is allowed, and the text exceeds the terminal height.
+ */
+void write_output(const std::string& text, bool allow_pager);
 
 /**
  * @brief Search and filter options from the CLI or config file.
