@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The roe Authors
 #include "roe/resolver.hpp"
 
 #if defined(__GNUG__)
