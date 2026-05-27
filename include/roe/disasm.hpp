@@ -6,6 +6,7 @@
  */
 
 #include "roe/core.hpp"
+#include "roe/binary.hpp"
 #include "roe/elf.hpp"
 
 #include <cstdint>
@@ -15,7 +16,22 @@
 
 namespace roe::disasm {
 
-enum class Architecture : std::uint8_t { X86_64, AArch64 };
+enum class Architecture : std::uint8_t {
+    X86,
+    X86_64,
+    Arm,
+    ArmThumb,
+    AArch64,
+    RiscV32,
+    RiscV64,
+    Mips32,
+    Mips32el,
+    Mips64,
+    Mips64el,
+    PowerPc32,
+    PowerPc64,
+    PowerPc64le
+};
 enum class Syntax : std::uint8_t { Intel, Att };
 
 enum class BranchKind : std::uint8_t {
@@ -63,6 +79,27 @@ struct Instruction {
  * @brief Disassemble an arbitrary code buffer.
  */
 Result<std::vector<Instruction>> disassemble_bytes(CodeBuffer code, const Options& options);
+
+/**
+ * @brief Convert a normalized binary architecture into disassembler options.
+ */
+Result<Options> options_for(binary::Architecture architecture, Syntax syntax = Syntax::Intel);
+
+/**
+ * @brief Disassemble owned section bytes from any supported binary format.
+ */
+Result<std::vector<Instruction>> disassemble_section(
+    const binary::SectionBytes& section,
+    const Options& options);
+
+/**
+ * @brief Disassemble a normalized function symbol from any supported binary format.
+ */
+Result<std::vector<Instruction>> disassemble_function(
+    const binary::BinaryFile& file,
+    const binary::Object& object,
+    const binary::Symbol& symbol,
+    const Options& options);
 
 /**
  * @brief Disassemble a function symbol from an ELF file.

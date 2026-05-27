@@ -6,9 +6,11 @@
  */
 
 #include "roe/core.hpp"
+#include "roe/binary.hpp"
 
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -19,7 +21,18 @@ namespace roe::elf {
 enum class Class : std::uint8_t { Elf32, Elf64 };
 enum class Endianness : std::uint8_t { Little, Big };
 enum class FileType : std::uint16_t { None, Relocatable, Executable, SharedObject, Core, Other };
-enum class Machine : std::uint16_t { Unknown, X86, X86_64, AArch64, Other };
+enum class Machine : std::uint16_t {
+    Unknown,
+    X86,
+    X86_64,
+    Arm,
+    AArch64,
+    RiscV,
+    Mips,
+    PowerPc,
+    PowerPc64,
+    Other
+};
 enum class SymbolBind : std::uint8_t { Local, Global, Weak, Other };
 enum class SymbolType : std::uint8_t { NoType, Object, Function, Section, File, Common, Tls, Other };
 
@@ -115,6 +128,16 @@ Result<File> parse_file(const std::filesystem::path& path);
  * @brief Parse an ELF file from owned bytes.
  */
 Result<File> parse_bytes(std::string source_name, std::vector<std::uint8_t> bytes);
+
+/**
+ * @brief Create the format-neutral BinaryFile adapter for a parsed ELF file.
+ */
+Result<std::unique_ptr<binary::BinaryFile>> open_file(const std::filesystem::path& path);
+
+/**
+ * @brief Create the format-neutral BinaryFile adapter from owned ELF bytes.
+ */
+Result<std::unique_ptr<binary::BinaryFile>> open_bytes(std::string source_name, std::vector<std::uint8_t> bytes);
 
 /**
  * @brief Find a section by exact name.

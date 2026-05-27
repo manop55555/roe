@@ -282,7 +282,7 @@ ROE_TEST_CASE(test_cli_main_entry_common_cases)
         std::ostringstream err;
         const int code = roe::cli::main_entry(static_cast<int>(argv.size()), argv.data(), out, err);
         ROE_CHECK(code == roe::cli::exit_ok);
-        ROE_CHECK(out.str().find("0.1.0") != std::string::npos);
+        ROE_CHECK(out.str().find("1.0.0") != std::string::npos);
     }
     {
         std::vector<std::string> args{"roe", "sample"};

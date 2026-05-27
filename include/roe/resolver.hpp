@@ -6,6 +6,7 @@
  */
 
 #include "roe/core.hpp"
+#include "roe/binary.hpp"
 #include "roe/disasm.hpp"
 #include "roe/elf.hpp"
 
@@ -36,6 +37,8 @@ struct ResolvedSymbol {
     std::uint64_t size{0};
     bool exact{false};
     bool dynamic{false};
+    std::size_t object_index{0};
+    bool synthetic{false};
 };
 
 /**
@@ -49,6 +52,7 @@ struct ResolvedReference {
     std::uint32_t relocation_type{0};
     std::int64_t addend{0};
     bool has_addend{false};
+    std::size_t object_index{0};
 };
 
 /**
@@ -57,6 +61,8 @@ struct ResolvedReference {
 struct Index {
     std::vector<ResolvedSymbol> symbols;
     std::vector<ResolvedReference> relocations;
+    binary::Format format{binary::Format::Unknown};
+    std::vector<binary::StringLiteral> strings;
 };
 
 /**
@@ -73,6 +79,11 @@ struct AnnotatedInstruction {
  * @brief Build a resolver index for a parsed ELF file.
  */
 Result<Index> build_index(const elf::File& file, const Options& options = {});
+
+/**
+ * @brief Build a resolver index for any parsed binary format.
+ */
+Result<Index> build_index(const binary::BinaryFile& file, const Options& options = {});
 
 /**
  * @brief Return a symbol that starts exactly at address.

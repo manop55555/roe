@@ -20,9 +20,14 @@ namespace roe::cli {
 enum class Action {
     ShowHelp,
     ShowVersion,
+    ShowCompletions,
     ListFunctions,
     DisassembleSymbol,
-    DisassembleSection
+    DisassembleSection,
+    DisassembleAll,
+    ShowXrefs,
+    ShowStats,
+    Watch
 };
 
 /**
@@ -33,9 +38,21 @@ struct Arguments {
     std::optional<std::filesystem::path> file;
     std::optional<std::string> symbol;
     std::optional<std::string> section;
+    std::optional<std::string> help_topic;
+    std::optional<std::string> completions_shell;
+    std::optional<std::string> grep_pattern;
+    std::optional<std::string> calls_symbol;
+    std::optional<std::string> contains_string;
+    std::optional<std::string> xref_symbol;
+    std::optional<std::string> arch;
     bool no_color{false};
+    bool no_pager{false};
     bool json{false};
     bool show_bytes{false};
+    bool source{false};
+    bool all_sections{false};
+    bool stats{false};
+    bool watch{false};
 };
 
 inline constexpr int exit_ok = 0;

@@ -13,3 +13,13 @@
 - Render branch previews inline with `\u2192` because the CLI contract requires preview text, not multi-line arrow diagrams.
 - Hide raw instruction bytes by default because the CLI is optimized for human scanning; `--show-bytes` restores them.
 - Synthesize x86-64 PLT symbols from `.rela.plt` order and `.plt` entry layout so direct calls can render as `name@plt`.
+- Add `binary::BinaryFile` above parser-specific models so v1 workflows do not encode ELF-only assumptions.
+- Keep legacy ELF APIs while adding `BinaryFile` adapters so v0.1 tests and v1 migration can coexist.
+- Return owned section bytes in the v1 binary model because fat binaries and archive members make borrowed iterator lifetimes fragile.
+- Detect formats by magic bytes only because extension-based detection is not reliable for object files and archives.
+- Treat fat Mach-O slices and archive members as `binary::Object` entries so object selection is uniform.
+- Put Capstone architecture selection behind `disasm::options_for` so parser agents only emit normalized architecture enums.
+- Keep debug information optional and non-fatal because `--source` must fall back gracefully without breaking disassembly.
+- Define xrefs, stats, and search as feature-layer data models so text and JSON formatters share one analysis result.
+- Put watch mode behind `roe::watcher` because inotify, kqueue, and ReadDirectoryChangesW require platform-specific implementations.
+- Install man pages, headers, legal files, and completion artifacts from CMake so packaging agents share one release layout.
