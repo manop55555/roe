@@ -1,0 +1,12 @@
+.git
+build
+build-*
+scratch
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+core
+compile_commands.json

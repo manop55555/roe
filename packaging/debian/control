@@ -1,0 +1,29 @@
+Source: roe
+Section: devel
+Priority: optional
+Maintainer: Manopakorn <manopakorn.sec@gmail.com>
+Build-Depends:
+ debhelper-compat (= 13),
+ cmake,
+ g++,
+ libcapstone-dev,
+ pkg-config
+Standards-Version: 4.6.2
+Homepage: https://github.com/USER/roe
+Rules-Requires-Root: no
+
+Package: roe
+Architecture: any
+Depends:
+ ${shlibs:Depends},
+ ${misc:Depends}
+Description: a disassembler fit for humans
+ roe is a command-line disassembler that prioritizes readable output. It
+ preserves addresses, resolves symbols and relocations, labels branch
+ targets, previews in-function jumps inline, and keeps raw instruction
+ bytes off by default.
+ .
+ It can list the functions in an object file, disassemble a single symbol
+ or section, annotate cross-function calls and relocations, and emit JSON
+ for downstream tooling. roe supports ELF, Mach-O, PE, and archive inputs
+ and is built on the Capstone disassembly engine.
