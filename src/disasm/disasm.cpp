@@ -12,9 +12,11 @@
 #include <capstone/x86.h>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <iterator>
 #include <limits>
+#include <optional>
 #include <string_view>
 #include <utility>
 
@@ -298,6 +300,78 @@ Result<CapstoneHandle> open_engine(const Options& options) {
     return std::nullopt;
 }
 
+constexpr std::size_t arm64_page_slots = 31; // X0..X30
+
+int arm64_reg_index(arm64_reg reg) noexcept {
+    if (reg >= ARM64_REG_X0 && reg <= ARM64_REG_X28) {
+        return static_cast<int>(reg) - static_cast<int>(ARM64_REG_X0);
+    }
+    if (reg == ARM64_REG_X29) {
+        return 29;
+    }
+    if (reg == ARM64_REG_X30) {
+        return 30;
+    }
+    return -1;
+}
+
+// Track ADRP page bases per register and fold the following ADD/LDR offset so the
+// effective data address of an ADRP+ADD (or ADRP+LDR) pair is recovered on ARM64,
+// enabling string-reference annotation there.
+void update_arm64_pairing(
+    const cs_insn& in,
+    std::array<std::optional<std::uint64_t>, arm64_page_slots>& page,
+    std::optional<std::uint64_t>& reference_target) noexcept {
+    if (in.detail == nullptr) {
+        return;
+    }
+    const cs_arm64& detail = in.detail->arm64;
+
+    if (in.id == ARM64_INS_ADRP) {
+        if (detail.op_count >= 2 && detail.operands[0].type == ARM64_OP_REG &&
+            detail.operands[1].type == ARM64_OP_IMM) {
+            const int dest = arm64_reg_index(detail.operands[0].reg);
+            if (dest >= 0) {
+                page[static_cast<std::size_t>(dest)] = static_cast<std::uint64_t>(detail.operands[1].imm);
+            }
+        }
+        return;
+    }
+
+    if (in.id == ARM64_INS_ADD && detail.op_count >= 3 && detail.operands[0].type == ARM64_OP_REG &&
+        detail.operands[1].type == ARM64_OP_REG && detail.operands[2].type == ARM64_OP_IMM) {
+        const int dest = arm64_reg_index(detail.operands[0].reg);
+        const int base = arm64_reg_index(detail.operands[1].reg);
+        if (base >= 0 && page[static_cast<std::size_t>(base)].has_value()) {
+            const std::uint64_t effective =
+                *page[static_cast<std::size_t>(base)] + static_cast<std::uint64_t>(detail.operands[2].imm);
+            reference_target = effective;
+            if (dest >= 0) {
+                page[static_cast<std::size_t>(dest)] = effective;
+            }
+            return;
+        }
+    }
+
+    if (in.id == ARM64_INS_LDR && detail.op_count >= 2 && detail.operands[1].type == ARM64_OP_MEM) {
+        const int base = arm64_reg_index(detail.operands[1].mem.base);
+        if (base >= 0 && page[static_cast<std::size_t>(base)].has_value()) {
+            reference_target = *page[static_cast<std::size_t>(base)] +
+                static_cast<std::uint64_t>(static_cast<std::int64_t>(detail.operands[1].mem.disp));
+        }
+    }
+
+    // Conservatively invalidate any register this instruction writes.
+    for (std::uint8_t i = 0; i < detail.op_count; ++i) {
+        if (detail.operands[i].type == ARM64_OP_REG && (detail.operands[i].access & CS_AC_WRITE) != 0) {
+            const int written = arm64_reg_index(detail.operands[i].reg);
+            if (written >= 0) {
+                page[static_cast<std::size_t>(written)].reset();
+            }
+        }
+    }
+}
+
 [[nodiscard]] bool is_unconditional_jump(Architecture architecture, const cs_insn& in) noexcept {
     if (family_of(architecture) == Family::X86) {
         return in.id == X86_INS_JMP;
@@ -544,6 +618,7 @@ Result<std::vector<Instruction>> disassemble_bytes(CodeBuffer code, const Option
 
     std::vector<Instruction> instructions;
     instructions.reserve(decoded.count());
+    std::array<std::optional<std::uint64_t>, arm64_page_slots> arm64_page{};
 
     for (const cs_insn& raw : decoded) {
         if (raw.size > static_cast<std::uint16_t>(std::numeric_limits<std::uint8_t>::max())) {
@@ -566,6 +641,9 @@ Result<std::vector<Instruction>> disassemble_bytes(CodeBuffer code, const Option
             instruction.branch_target = direct_target(options.architecture, raw);
         }
         instruction.reference_target = data_reference(options.architecture, raw);
+        if (family_of(options.architecture) == Family::Arm64) {
+            update_arm64_pairing(raw, arm64_page, instruction.reference_target);
+        }
         instructions.push_back(std::move(instruction));
     }
 
