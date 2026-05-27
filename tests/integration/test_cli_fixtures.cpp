@@ -245,7 +245,8 @@ TEST_CASE("test_cli_fixtures_demangles_cpp_symbols", "[integration]")
     const CommandResult list_result =
         run_command(shell_quote(roe) + " " + shell_quote(fixtures.cpp_executable) + " --no-color");
     REQUIRE(list_result.exit_code == 0);
-    CHECK(contains(list_result.output, "fixture::Worker::compute") || contains(list_result.output, "_ZN7fixture6Worker7computeEi"));
+    CHECK((contains(list_result.output, "fixture::Worker::compute")
+        || contains(list_result.output, "_ZN7fixture6Worker7computeEi")));
 
     const CommandResult disasm_result = run_command(
         shell_quote(roe) + " " + shell_quote(fixtures.cpp_executable) +

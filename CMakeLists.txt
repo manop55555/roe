@@ -151,6 +151,56 @@ include(CTest)
 if(ROE_BUILD_TESTS)
     enable_testing()
     find_package(Catch2 3 QUIET)
+    if(NOT Catch2_FOUND)
+        include(FetchContent)
+        FetchContent_Declare(
+            Catch2
+            GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+            GIT_TAG v3.7.1
+        )
+        FetchContent_MakeAvailable(Catch2)
+    endif()
+    # Test fixtures compiled from source at build time (never checked in as binaries).
+    set(ROE_FIXTURE_BIN_DIR "${CMAKE_CURRENT_BINARY_DIR}/fixtures")
+    file(MAKE_DIRECTORY "${ROE_FIXTURE_BIN_DIR}")
+    set(ROE_FIXTURE_C_SRC "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/sample.c")
+    set(ROE_FIXTURE_CPP_SRC "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/cpp_symbols.cc")
+    set(ROE_FIXTURE_ELF "${ROE_FIXTURE_BIN_DIR}/sample.elf64")
+    set(ROE_FIXTURE_CPP "${ROE_FIXTURE_BIN_DIR}/sample_cpp.elf64")
+    add_custom_command(
+        OUTPUT "${ROE_FIXTURE_ELF}"
+        COMMAND "${CMAKE_CXX_COMPILER}" -x c -g -O1 -o "${ROE_FIXTURE_ELF}" "${ROE_FIXTURE_C_SRC}"
+        DEPENDS "${ROE_FIXTURE_C_SRC}"
+        COMMENT "Compiling x86-64 ELF test fixture"
+        VERBATIM)
+    set(ROE_FIXTURE_OUTPUTS "${ROE_FIXTURE_ELF}")
+    set(ROE_FIXTURE_DEFINES ROE_FIXTURE_ELF="${ROE_FIXTURE_ELF}" ROE_FIXTURE_SRC="${ROE_FIXTURE_C_SRC}")
+    if(EXISTS "${ROE_FIXTURE_CPP_SRC}")
+        add_custom_command(
+            OUTPUT "${ROE_FIXTURE_CPP}"
+            COMMAND "${CMAKE_CXX_COMPILER}" -g -O0 -o "${ROE_FIXTURE_CPP}" "${ROE_FIXTURE_CPP_SRC}"
+            DEPENDS "${ROE_FIXTURE_CPP_SRC}"
+            COMMENT "Compiling C++ ELF test fixture"
+            VERBATIM)
+        list(APPEND ROE_FIXTURE_OUTPUTS "${ROE_FIXTURE_CPP}")
+        list(APPEND ROE_FIXTURE_DEFINES ROE_FIXTURE_CPP="${ROE_FIXTURE_CPP}")
+    endif()
+    find_program(ROE_AARCH64_CC NAMES aarch64-linux-gnu-gcc)
+    if(ROE_AARCH64_CC)
+        set(ROE_FIXTURE_AARCH64 "${ROE_FIXTURE_BIN_DIR}/sample.aarch64")
+        add_custom_command(
+            OUTPUT "${ROE_FIXTURE_AARCH64}"
+            COMMAND "${ROE_AARCH64_CC}" -x c -g -O1 -static -o "${ROE_FIXTURE_AARCH64}" "${ROE_FIXTURE_C_SRC}"
+            DEPENDS "${ROE_FIXTURE_C_SRC}"
+            COMMENT "Compiling aarch64 ELF test fixture"
+            VERBATIM)
+        list(APPEND ROE_FIXTURE_OUTPUTS "${ROE_FIXTURE_AARCH64}")
+        list(APPEND ROE_FIXTURE_DEFINES ROE_FIXTURE_AARCH64="${ROE_FIXTURE_AARCH64}")
+    else()
+        list(APPEND ROE_FIXTURE_DEFINES ROE_FIXTURE_AARCH64="")
+    endif()
+    add_custom_target(roe_fixtures ALL DEPENDS ${ROE_FIXTURE_OUTPUTS})
+
     file(
         GLOB_RECURSE
         ROE_TEST_SOURCES
@@ -164,6 +214,8 @@ if(ROE_BUILD_TESTS)
         if(TARGET Catch2::Catch2WithMain)
             target_link_libraries("${test_name}" PRIVATE Catch2::Catch2WithMain)
         endif()
+        add_dependencies("${test_name}" roe_fixtures)
+        target_compile_definitions("${test_name}" PRIVATE ${ROE_FIXTURE_DEFINES})
         add_test(NAME "${test_name}" COMMAND "${test_name}")
     endforeach()
 endif()
