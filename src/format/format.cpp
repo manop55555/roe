@@ -69,6 +69,31 @@ std::string instruction_text(const disasm::Instruction& instruction)
     return instruction.mnemonic + " " + instruction.operands;
 }
 
+// A token looks like a numeric immediate (0x1f, -8, #0x10) rather than a register.
+bool looks_like_immediate(std::string_view token) noexcept
+{
+    std::size_t index = 0;
+    if (index < token.size() && token[index] == '#') {
+        ++index;
+    }
+    if (index < token.size() && token[index] == '-') {
+        ++index;
+    }
+    bool has_digit = false;
+    for (; index < token.size(); ++index) {
+        const char character = token[index];
+        if (character >= '0' && character <= '9') {
+            has_digit = true;
+        } else if (character == 'x' || character == 'X' || (character >= 'a' && character <= 'f') ||
+                   (character >= 'A' && character <= 'F')) {
+            continue;
+        } else {
+            return false;
+        }
+    }
+    return has_digit;
+}
+
 std::string banner_text()
 {
     std::ostringstream out;
@@ -408,17 +433,36 @@ Result<std::string> render_disassembly(
         if (instruction.branch_target.has_value() && !branch_target_is_in_current_output &&
             annotated.branch_target_symbol.has_value()) {
             out << ' ' << annotated.branch_target_symbol->name;
-        } else {
-            if (!instruction.operands.empty()) {
+        } else if (instruction.branch_target.has_value()) {
+            const std::uint64_t target = instruction.branch_target.value();
+            const std::string target_text = hex_address(target);
+            if (instruction.operands.find(target_text) != std::string::npos) {
+                // The operand string already shows the absolute target (x86, ARM64, PPC).
                 out << ' ' << instruction.operands;
-            }
-            if (instruction.branch_target.has_value()) {
-                const std::uint64_t target = instruction.branch_target.value();
-                const std::string target_text = hex_address(target);
-                if (instruction.operands.find(target_text) == std::string::npos) {
+            } else {
+                // The operand string carries a relative displacement (RISC-V, MIPS);
+                // rewrite the trailing immediate as the resolved absolute target.
+                const auto comma = instruction.operands.rfind(", ");
+                const std::string last_token = comma == std::string::npos
+                    ? instruction.operands
+                    : instruction.operands.substr(comma + 2);
+                if (looks_like_immediate(last_token)) {
+                    const std::string prefix =
+                        comma == std::string::npos ? std::string{} : instruction.operands.substr(0, comma);
+                    if (!prefix.empty()) {
+                        out << ' ' << prefix << ", " << target_text;
+                    } else {
+                        out << ' ' << target_text;
+                    }
+                } else {
+                    if (!instruction.operands.empty()) {
+                        out << ' ' << instruction.operands;
+                    }
                     out << ' ' << target_text;
                 }
             }
+        } else if (!instruction.operands.empty()) {
+            out << ' ' << instruction.operands;
         }
 
         if (preview.has_value()) {

@@ -26,6 +26,14 @@ bool include_symbol(const elf::Symbol& symbol, const Options& options) noexcept 
     if (symbol.type == elf::SymbolType::File || symbol.type == elf::SymbolType::Section) {
         return false;
     }
+    // Skip compiler-internal local labels (.L*) and mapping symbols ($a/$t/$d/$x),
+    // which would otherwise pollute listings and branch annotations on .o files.
+    if (symbol.name.rfind(".L", 0) == 0) {
+        return false;
+    }
+    if (symbol.name.front() == '$') {
+        return false;
+    }
     if (symbol.dynamic && !options.include_dynamic_symbols) {
         return false;
     }
@@ -167,6 +175,11 @@ Result<Index> build_index(const elf::File& file, const Options& options) {
         }
 
         const std::string raw_name = relocation_raw_name(file, relocation);
+        // Relocations to compiler-internal local labels (.L*) are redundant with the
+        // branch targets roe already resolves; suppress them to keep output clean.
+        if (raw_name.rfind(".L", 0) == 0) {
+            continue;
+        }
         if (is_plt_relocation_section(relocation.section_name) && !raw_name.empty()) {
             plt_relocation_names.push_back(raw_name);
         }
