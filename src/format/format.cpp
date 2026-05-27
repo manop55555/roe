@@ -305,26 +305,65 @@ Result<std::string> render_banner()
     return Result<std::string>::ok(banner_text());
 }
 
+Result<std::string> render_version()
+{
+    std::ostringstream out;
+    out << banner_text() << "\n";
+    out << program_name << " " << version_string << "\n";
+    out << "  build commit:  " << build_commit << "\n";
+    out << "  build date:    " << build_date << "\n";
+    out << "  capstone:      " << capstone_version << "\n";
+    out << "  formats:       ELF (Mach-O, PE/COFF, and archive are recognized; this build disassembles ELF)\n";
+    out << "  architectures: x86, x86-64, arm, thumb, aarch64, riscv32, riscv64, "
+           "mips, mipsel, mips64, mips64el, ppc, ppc64, ppc64le\n";
+    return Result<std::string>::ok(out.str());
+}
+
 Result<std::string> render_help()
 {
     std::ostringstream out;
     out << banner_text() << "\n";
     out << "Usage:\n";
-    out << "  roe <file>\n";
-    out << "  roe <file> <symbol> [--no-color] [--show-bytes] [--json]\n";
-    out << "  roe <file> --section <name> [--no-color] [--show-bytes] [--json]\n";
-    out << "  roe --help\n";
-    out << "  roe --version\n\n";
-    out << "Commands:\n";
-    out << "  <file>                 List functions with preserved addresses\n";
-    out << "  <file> <symbol>        Disassemble one function\n";
-    out << "  --section <name>       Disassemble an entire section, for example .text\n\n";
-    out << "Options:\n";
-    out << "  --json                 Emit machine-readable JSON\n";
-    out << "  --no-color             Disable ANSI color for pipes and logs\n";
-    out << "  --show-bytes           Show raw instruction bytes\n";
-    out << "  --help                 Show this help text\n";
-    out << "  --version              Show version banner\n";
+    out << "  roe <file>                     list functions with preserved addresses\n";
+    out << "  roe <file> <symbol>            disassemble one function, symbols resolved\n";
+    out << "  roe <file> --section <name>    disassemble a named section\n";
+    out << "  roe <file> --all               disassemble every executable section\n\n";
+
+    out << "Input:\n";
+    out << "  <file>                 object, executable, shared library, or .o to inspect\n";
+    out << "  <symbol>               function name (mangled or demangled) to disassemble\n";
+    out << "  --section <name>       disassemble a named section, e.g. .text\n";
+    out << "  --all, -D              disassemble every executable section\n";
+    out << "  --arch <name>          override the architecture (e.g. thumb, riscv64)\n\n";
+
+    out << "Filtering:\n";
+    out << "  --grep <regex>         list functions whose name matches a regex\n";
+    out << "  --calls <symbol>       list functions that call or branch to a symbol\n";
+    out << "  --contains <string>    list functions whose body references a string\n";
+    out << "  --xref <symbol>        show every call site of a symbol\n";
+    out << "  --stats                per-function size, basic blocks, branches, depth\n\n";
+
+    out << "Output:\n";
+    out << "  --json                 emit machine-readable JSON\n";
+    out << "  --no-color             disable ANSI color for pipes and logs\n";
+    out << "  --show-bytes           show raw instruction bytes (off by default)\n";
+    out << "  --source               interleave source lines from debug info\n";
+    out << "  --no-pager             do not page long output through $PAGER\n\n";
+
+    out << "Workflow:\n";
+    out << "  --watch                re-run automatically when the file changes\n";
+    out << "  --completions <shell>  emit a completion script (bash|zsh|fish|powershell)\n";
+    out << "  --help [topic]         show help; topics: usage formats arches examples config json\n";
+    out << "  --version, -V          show version, build info, arches, and formats\n\n";
+
+    out << "Examples:\n";
+    out << "  roe vmlinux.o                          list every function\n";
+    out << "  roe vmlinux.o handle_mm_fault          disassemble one function, resolved\n";
+    out << "  roe a.out main --json | jq .           machine-readable disassembly\n";
+    out << "  roe libfoo.so --grep '::'              find C++ methods\n";
+    out << "  roe a.out --xref malloc                find every call site of malloc\n\n";
+
+    out << "See 'man roe' or https://github.com/USER/roe for the full manual.\n";
     return Result<std::string>::ok(out.str());
 }
 
@@ -388,6 +427,75 @@ Result<std::string> render_function_list(
         out << padded_hex_address(function.address) << "  ";
         out << std::setw(8) << std::dec << function.size << "  ";
         out << display_name_for_function(function, index);
+        if (function.dynamic) {
+            out << " " << colorize("[dyn]", ansi_dim, options);
+        }
+        out << "\n";
+    }
+    return Result<std::string>::ok(out.str());
+}
+
+Result<std::string> render_function_list(
+    const binary::FileView& file,
+    const resolver::Index& index,
+    const Options& options)
+{
+    const std::optional<binary::Object> object = binary::primary_object(file);
+    std::vector<binary::Symbol> functions;
+    if (object.has_value()) {
+        for (const binary::Symbol& symbol : object->symbols) {
+            if (symbol.type == binary::SymbolType::Function && symbol.defined) {
+                functions.push_back(symbol);
+            }
+        }
+    }
+    std::sort(functions.begin(), functions.end(), [](const binary::Symbol& lhs, const binary::Symbol& rhs) {
+        if (lhs.address == rhs.address) {
+            return lhs.name < rhs.name;
+        }
+        return lhs.address < rhs.address;
+    });
+
+    const auto display_for = [&index](const binary::Symbol& function) -> std::string {
+        for (const resolver::ResolvedSymbol& symbol : index.symbols) {
+            if (symbol.address == function.address && symbol.raw_name == function.raw_name) {
+                return symbol.name;
+            }
+        }
+        for (const resolver::ResolvedSymbol& symbol : index.symbols) {
+            if (symbol.address == function.address) {
+                return symbol.name;
+            }
+        }
+        return function.name;
+    };
+
+    std::ostringstream out;
+    out << colorize("Functions", ansi_bold, options) << " in " << file.source_name << "\n";
+    if (functions.empty() && !index.symbols.empty()) {
+        std::vector<resolver::ResolvedSymbol> symbols = index.symbols;
+        std::sort(symbols.begin(), symbols.end(),
+            [](const resolver::ResolvedSymbol& lhs, const resolver::ResolvedSymbol& rhs) {
+                if (lhs.address == rhs.address) {
+                    return lhs.name < rhs.name;
+                }
+                return lhs.address < rhs.address;
+            });
+        for (const resolver::ResolvedSymbol& symbol : symbols) {
+            out << padded_hex_address(symbol.address) << "  ";
+            out << std::setw(8) << std::dec << symbol.size << "  " << symbol.name;
+            if (symbol.dynamic) {
+                out << " " << colorize("[dyn]", ansi_dim, options);
+            }
+            out << "\n";
+        }
+        return Result<std::string>::ok(out.str());
+    }
+
+    for (const binary::Symbol& function : functions) {
+        out << padded_hex_address(function.address) << "  ";
+        out << std::setw(8) << std::dec << function.size << "  ";
+        out << display_for(function);
         if (function.dynamic) {
             out << " " << colorize("[dyn]", ansi_dim, options);
         }
@@ -552,6 +660,131 @@ Result<std::string> render_json(
 
     out << "  ]\n";
     out << "}\n";
+    return Result<std::string>::ok(out.str());
+}
+
+Result<std::string> render_help_topic(const std::string& topic)
+{
+    std::ostringstream out;
+    if (topic == "usage") {
+        out << "Usage:\n";
+        out << "  roe <file>                     list functions\n";
+        out << "  roe <file> <symbol>            disassemble one function\n";
+        out << "  roe <file> --section <name>    disassemble a section\n";
+        out << "  roe <file> --all               disassemble all executable sections\n";
+        out << "  roe <file> --xref <symbol>     show call sites of a symbol\n";
+        out << "  roe <file> --stats             per-function statistics\n";
+    } else if (topic == "formats") {
+        out << "Supported container formats (detected by magic bytes, not extension):\n";
+        out << "  ELF              fully supported (Linux, BSD): ELF32/64, little/big endian\n";
+        out << "  Mach-O           recognized; reported as unsupported in this build\n";
+        out << "  PE/COFF          recognized; reported as unsupported in this build\n";
+        out << "  static archive   recognized; reported as unsupported in this build\n";
+    } else if (topic == "arches") {
+        out << "Disassembly architectures (Capstone-backed):\n";
+        out << "  x86, x86-64                fully verified\n";
+        out << "  aarch64 (ARM64)            fully verified\n";
+        out << "  arm, thumb                 supported (use --arch thumb for Thumb code)\n";
+        out << "  riscv32, riscv64           supported (compressed instructions enabled)\n";
+        out << "  mips, mipsel, mips64, mips64el   supported\n";
+        out << "  ppc, ppc64, ppc64le        supported\n";
+    } else if (topic == "examples") {
+        out << "Examples:\n";
+        out << "  roe vmlinux.o                          list every function\n";
+        out << "  roe vmlinux.o handle_mm_fault          disassemble one function\n";
+        out << "  roe a.out main --show-bytes            include raw instruction bytes\n";
+        out << "  roe a.out main --json | jq .           machine-readable output\n";
+        out << "  roe libfoo.so --grep '::'              find C++ methods\n";
+        out << "  roe a.out --calls printf               functions that call printf\n";
+        out << "  roe a.out --xref malloc                every call site of malloc\n";
+        out << "  roe a.out --stats                      per-function statistics\n";
+    } else if (topic == "config") {
+        out << "Configuration file (CLI flags always override):\n";
+        out << "  Linux:    $XDG_CONFIG_HOME/roe/config.toml  (default ~/.config/roe/config.toml)\n";
+        out << "  macOS:    ~/Library/Application Support/roe/config.toml\n";
+        out << "  Windows:  %APPDATA%\\roe\\config.toml\n";
+        out << "  Override: set ROE_CONFIG to an explicit path\n";
+        out << "Keys: color, pager, show_bytes, source, syntax. See docs/CONFIG.md.\n";
+    } else if (topic == "json") {
+        out << "JSON output (--json):\n";
+        out << "  Disassembly: { \"instructions\": [ { address, size, bytes, mnemonic,\n";
+        out << "    operands, label, branch_target, branch_preview, symbol, reference } ] }\n";
+        out << "  Addresses are 0x-prefixed hex strings; sizes are integers.\n";
+        out << "  See docs/JSON_SCHEMA.md for the full, stable schema.\n";
+    } else {
+        return Result<std::string>::err(
+            {ErrorCode::Usage,
+             "unknown help topic: " + topic + " (try usage, formats, arches, examples, config, json)"});
+    }
+    return Result<std::string>::ok(out.str());
+}
+
+Result<std::string> render_completions(const std::string& shell)
+{
+    static constexpr std::string_view flags =
+        "--section --all -D --arch --grep --calls --contains --xref --stats "
+        "--json --no-color --show-bytes --source --no-pager --watch --completions "
+        "--help -h --version -V";
+    std::ostringstream out;
+    if (shell == "bash") {
+        out << "# roe bash completion. Source this file or place it in your bash-completion dir.\n";
+        out << "_roe() {\n";
+        out << "    local cur=\"${COMP_WORDS[COMP_CWORD]}\"\n";
+        out << "    if [[ \"$cur\" == -* ]]; then\n";
+        out << "        COMPREPLY=( $(compgen -W \"" << flags << "\" -- \"$cur\") )\n";
+        out << "    else\n";
+        out << "        COMPREPLY=( $(compgen -f -- \"$cur\") )\n";
+        out << "    fi\n";
+        out << "}\n";
+        out << "complete -F _roe roe\n";
+    } else if (shell == "zsh") {
+        out << "#compdef roe\n";
+        out << "# roe zsh completion. Place on your $fpath as _roe.\n";
+        out << "_roe() {\n";
+        out << "    local -a opts\n";
+        out << "    opts=(" << flags << ")\n";
+        out << "    _arguments '*: :->args' && return\n";
+        out << "    if [[ $words[CURRENT] == -* ]]; then\n";
+        out << "        compadd -- ${opts}\n";
+        out << "    else\n";
+        out << "        _files\n";
+        out << "    fi\n";
+        out << "}\n";
+        out << "_roe \"$@\"\n";
+    } else if (shell == "fish") {
+        out << "# roe fish completion.\n";
+        out << "complete -c roe -l section -d 'Disassemble a named section'\n";
+        out << "complete -c roe -l all -s D -d 'Disassemble all executable sections'\n";
+        out << "complete -c roe -l arch -d 'Override architecture'\n";
+        out << "complete -c roe -l grep -d 'Filter functions by name regex'\n";
+        out << "complete -c roe -l calls -d 'Functions that call a symbol'\n";
+        out << "complete -c roe -l contains -d 'Functions referencing a string'\n";
+        out << "complete -c roe -l xref -d 'Call sites of a symbol'\n";
+        out << "complete -c roe -l stats -d 'Per-function statistics'\n";
+        out << "complete -c roe -l json -d 'Machine-readable JSON'\n";
+        out << "complete -c roe -l no-color -d 'Disable color'\n";
+        out << "complete -c roe -l show-bytes -d 'Show raw instruction bytes'\n";
+        out << "complete -c roe -l source -d 'Interleave source lines'\n";
+        out << "complete -c roe -l no-pager -d 'Disable the pager'\n";
+        out << "complete -c roe -l watch -d 'Re-run on file change'\n";
+        out << "complete -c roe -l completions -d 'Emit a shell completion script'\n";
+        out << "complete -c roe -l help -s h -d 'Show help'\n";
+        out << "complete -c roe -l version -s V -d 'Show version'\n";
+    } else if (shell == "powershell") {
+        out << "# roe PowerShell completion. Add to your profile.\n";
+        out << "Register-ArgumentCompleter -Native -CommandName roe -ScriptBlock {\n";
+        out << "    param($wordToComplete, $commandAst, $cursorPosition)\n";
+        out << "    $opts = @('" << "--section','--all','--arch','--grep','--calls','--contains',"
+            << "'--xref','--stats','--json','--no-color','--show-bytes','--source',"
+            << "'--no-pager','--watch','--completions','--help','--version')\n";
+        out << "    $opts | Where-Object { $_ -like \"$wordToComplete*\" } | ForEach-Object {\n";
+        out << "        [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterName', $_)\n";
+        out << "    }\n";
+        out << "}\n";
+    } else {
+        return Result<std::string>::err(
+            {ErrorCode::Usage, "unknown shell: " + shell + " (try bash, zsh, fish, powershell)"});
+    }
     return Result<std::string>::ok(out.str());
 }
 

@@ -1,14 +1,21 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The roe Authors
+
 #include "roe/cli.hpp"
 
+#include "roe/binary.hpp"
 #include "roe/disasm.hpp"
-#include "roe/elf.hpp"
 #include "roe/format.hpp"
 #include "roe/resolver.hpp"
 #include "roe/version.hpp"
 
 #include <cstdlib>
+#include <memory>
+#include <optional>
 #include <ostream>
+#include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace roe::cli {
@@ -17,11 +24,6 @@ namespace {
 Error usage_error(std::string message)
 {
     return Error{ErrorCode::Usage, std::move(message), 0, false};
-}
-
-Error internal_error(std::string message)
-{
-    return Error{ErrorCode::Internal, std::move(message), 0, false};
 }
 
 bool is_flag(std::string_view argument) noexcept
@@ -42,6 +44,8 @@ format::Options format_options(const Arguments& parsed) noexcept
     options.color = !parsed.no_color && !options.no_color_env;
     options.preserve_addresses = true;
     options.show_bytes = parsed.show_bytes;
+    options.source = parsed.source;
+    options.pager = !parsed.no_pager;
     return options;
 }
 
@@ -60,42 +64,25 @@ void write_error(std::ostream& stream, const Error& error, const format::Options
         write_line(stream, rendered.value());
         return;
     }
-
-    stream << program_name << ": error: " << error.message;
-    if (error.has_offset) {
-        stream << " at offset 0x" << std::hex << error.offset << std::dec;
-    }
-    stream << '\n';
+    stream << program_name << ": error: " << error.message << '\n';
 }
 
-void write_missing_symbol_error(
-    std::ostream& stream,
-    std::string_view symbol,
-    const elf::File& file)
+void write_missing_symbol_error(std::ostream& stream, std::string_view symbol, std::string_view source, bool stripped)
 {
-    stream << "error: symbol '" << symbol << "' not found in " << file.source_name << "\n";
-    if (file.stripped) {
+    stream << "error: symbol '" << symbol << "' not found in " << source << "\n";
+    if (stripped) {
         stream << "\n";
         stream << "hint: the binary is stripped (.symtab is absent). try:\n";
         stream << "  - using an unstripped binary, or\n";
-        stream << "  - listing available dynamic symbols: roe " << file.source_name << "\n";
+        stream << "  - listing available dynamic symbols: roe " << source << "\n";
     }
 }
 
-int write_rendered(Result<std::string> rendered, std::ostream& out, std::ostream& err, const format::Options& options)
-{
-    if (!rendered) {
-        write_error(err, rendered.error(), options);
-        return exit_disasm_error;
-    }
-
-    write_line(out, rendered.value());
-    return exit_ok;
-}
-
-int disassembly_exit_for(const ErrorCode code) noexcept
+int exit_for(ErrorCode code) noexcept
 {
     switch (code) {
+    case ErrorCode::Usage:
+        return exit_usage;
     case ErrorCode::FileIo:
     case ErrorCode::MalformedInput:
     case ErrorCode::UnsupportedFormat:
@@ -105,44 +92,38 @@ int disassembly_exit_for(const ErrorCode code) noexcept
     }
 }
 
-disasm::Architecture architecture_for(const elf::File& file) noexcept
+int write_rendered(Result<std::string> rendered, std::ostream& out, std::ostream& err, const format::Options& options)
 {
-    const bool big = file.endianness == elf::Endianness::Big;
-    const bool elf64 = file.elf_class == elf::Class::Elf64;
-    switch (file.machine) {
-    case elf::Machine::X86:
-        return disasm::Architecture::X86;
-    case elf::Machine::X86_64:
-        return disasm::Architecture::X86_64;
-    case elf::Machine::Arm:
-        return disasm::Architecture::Arm;
-    case elf::Machine::AArch64:
-        return disasm::Architecture::AArch64;
-    case elf::Machine::RiscV:
-        return elf64 ? disasm::Architecture::RiscV64 : disasm::Architecture::RiscV32;
-    case elf::Machine::Mips:
-        if (elf64) {
-            return big ? disasm::Architecture::Mips64 : disasm::Architecture::Mips64el;
-        }
-        return big ? disasm::Architecture::Mips32 : disasm::Architecture::Mips32el;
-    case elf::Machine::PowerPc:
-        return disasm::Architecture::PowerPc32;
-    case elf::Machine::PowerPc64:
-        return big ? disasm::Architecture::PowerPc64 : disasm::Architecture::PowerPc64le;
-    case elf::Machine::Unknown:
-    case elf::Machine::Other:
-        break;
+    if (!rendered) {
+        const int code = exit_for(rendered.error().code);
+        write_error(err, rendered.error(), options);
+        return code;
     }
-    return disasm::Architecture::X86_64;
+    write_line(out, rendered.value());
+    return exit_ok;
 }
 
-disasm::Options disasm_options_for(const elf::File& file) noexcept
+std::optional<binary::Architecture> arch_from_name(std::string_view name) noexcept
 {
-    disasm::Options options;
-    options.architecture = architecture_for(file);
-    options.syntax = disasm::Syntax::Intel;
-    options.resolve_branch_targets = true;
-    return options;
+    static const std::pair<std::string_view, binary::Architecture> table[] = {
+        {"x86", binary::Architecture::X86},          {"i386", binary::Architecture::X86},
+        {"x86_64", binary::Architecture::X86_64},    {"x86-64", binary::Architecture::X86_64},
+        {"amd64", binary::Architecture::X86_64},     {"arm", binary::Architecture::Arm},
+        {"armv7", binary::Architecture::Arm},        {"thumb", binary::Architecture::ArmThumb},
+        {"arm-thumb", binary::Architecture::ArmThumb}, {"aarch64", binary::Architecture::AArch64},
+        {"arm64", binary::Architecture::AArch64},    {"riscv32", binary::Architecture::RiscV32},
+        {"riscv64", binary::Architecture::RiscV64},  {"mips", binary::Architecture::Mips32},
+        {"mipsel", binary::Architecture::Mips32el},  {"mips64", binary::Architecture::Mips64},
+        {"mips64el", binary::Architecture::Mips64el}, {"ppc", binary::Architecture::PowerPc32},
+        {"powerpc", binary::Architecture::PowerPc32}, {"ppc64", binary::Architecture::PowerPc64},
+        {"ppc64le", binary::Architecture::PowerPc64le},
+    };
+    for (const auto& [key, value] : table) {
+        if (key == name) {
+            return value;
+        }
+    }
+    return std::nullopt;
 }
 
 Result<std::string> render_annotated(
@@ -156,6 +137,25 @@ Result<std::string> render_annotated(
     return format::render_disassembly(annotated, options);
 }
 
+// Find a function target by raw or demangled name, returning its address and size.
+struct TargetSymbol {
+    std::uint64_t address{0};
+    std::uint64_t size{0};
+};
+
+std::optional<TargetSymbol> find_target(const resolver::Index& index, const binary::FileView& view, std::string_view name)
+{
+    for (const resolver::ResolvedSymbol& symbol : index.symbols) {
+        if (symbol.name == name || symbol.raw_name == name) {
+            return TargetSymbol{symbol.address, symbol.size};
+        }
+    }
+    if (const std::optional<binary::Symbol> symbol = binary::find_symbol(view, 0, name)) {
+        return TargetSymbol{symbol->address, symbol->size};
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
 Result<Arguments> parse_args(int argc, char** argv)
@@ -167,54 +167,106 @@ Result<Arguments> parse_args(int argc, char** argv)
     Arguments parsed;
     std::vector<std::string> positional;
 
+    const auto value_for = [&](int& index, std::string_view flag) -> Result<std::string> {
+        if (index + 1 >= argc || argv[index + 1] == nullptr || is_flag(argv[index + 1])) {
+            return Result<std::string>::err(usage_error(std::string(flag) + " requires a value"));
+        }
+        ++index;
+        return Result<std::string>::ok(std::string(argv[index]));
+    };
+
     for (int index = 1; index < argc; ++index) {
         if (argv[index] == nullptr) {
             return Result<Arguments>::err(usage_error("invalid null argument"));
         }
-
         const std::string_view argument{argv[index]};
+
         if (argument == "--help" || argument == "-h") {
             parsed.action = Action::ShowHelp;
+            if (index + 1 < argc && argv[index + 1] != nullptr && !is_flag(argv[index + 1])) {
+                parsed.help_topic = std::string(argv[index + 1]);
+            }
             return Result<Arguments>::ok(std::move(parsed));
         }
         if (argument == "--version" || argument == "-V") {
             parsed.action = Action::ShowVersion;
             return Result<Arguments>::ok(std::move(parsed));
         }
+        if (argument == "--completions") {
+            Result<std::string> shell = value_for(index, "--completions");
+            if (!shell) {
+                return Result<Arguments>::err(std::move(shell).error());
+            }
+            parsed.completions_shell = std::move(shell).value();
+            parsed.action = Action::ShowCompletions;
+            return Result<Arguments>::ok(std::move(parsed));
+        }
         if (argument == "--no-color") {
             parsed.no_color = true;
-            continue;
-        }
-        if (argument == "--json") {
+        } else if (argument == "--no-pager") {
+            parsed.no_pager = true;
+        } else if (argument == "--json") {
             parsed.json = true;
-            continue;
-        }
-        if (argument == "--show-bytes") {
+        } else if (argument == "--show-bytes") {
             parsed.show_bytes = true;
-            continue;
-        }
-        if (argument == "--section") {
-            if (index + 1 >= argc || argv[index + 1] == nullptr || is_flag(argv[index + 1])) {
+        } else if (argument == "--source") {
+            parsed.source = true;
+        } else if (argument == "--watch") {
+            parsed.watch = true;
+        } else if (argument == "--stats") {
+            parsed.stats = true;
+        } else if (argument == "--all" || argument == "-D") {
+            parsed.all_sections = true;
+        } else if (argument == "--section") {
+            Result<std::string> value = value_for(index, "--section");
+            if (!value) {
+                return Result<Arguments>::err(std::move(value).error());
+            }
+            parsed.section = std::move(value).value();
+        } else if (argument.rfind("--section=", 0) == 0) {
+            const std::string_view name = argument.substr(std::string_view("--section=").size());
+            if (name.empty()) {
                 return Result<Arguments>::err(usage_error("--section requires a section name"));
             }
-            parsed.section = argv[index + 1];
-            ++index;
-            continue;
-        }
-        constexpr std::string_view section_prefix{"--section="};
-        if (argument.substr(0, section_prefix.size()) == section_prefix) {
-            const std::string_view section_name = argument.substr(section_prefix.size());
-            if (section_name.empty()) {
-                return Result<Arguments>::err(usage_error("--section requires a section name"));
+            parsed.section = std::string(name);
+        } else if (argument == "--grep") {
+            Result<std::string> value = value_for(index, "--grep");
+            if (!value) {
+                return Result<Arguments>::err(std::move(value).error());
             }
-            parsed.section = std::string{section_name};
-            continue;
+            parsed.grep_pattern = std::move(value).value();
+        } else if (argument == "--calls") {
+            Result<std::string> value = value_for(index, "--calls");
+            if (!value) {
+                return Result<Arguments>::err(std::move(value).error());
+            }
+            parsed.calls_symbol = std::move(value).value();
+        } else if (argument == "--contains") {
+            Result<std::string> value = value_for(index, "--contains");
+            if (!value) {
+                return Result<Arguments>::err(std::move(value).error());
+            }
+            parsed.contains_string = std::move(value).value();
+        } else if (argument == "--xref") {
+            Result<std::string> value = value_for(index, "--xref");
+            if (!value) {
+                return Result<Arguments>::err(std::move(value).error());
+            }
+            parsed.xref_symbol = std::move(value).value();
+        } else if (argument == "--arch") {
+            Result<std::string> value = value_for(index, "--arch");
+            if (!value) {
+                return Result<Arguments>::err(std::move(value).error());
+            }
+            if (!arch_from_name(value.value()).has_value()) {
+                return Result<Arguments>::err(usage_error("unknown architecture: " + value.value()));
+            }
+            parsed.arch = std::move(value).value();
+        } else if (is_flag(argument)) {
+            return Result<Arguments>::err(usage_error("unknown option: " + std::string(argument)));
+        } else {
+            positional.emplace_back(argument);
         }
-        if (is_flag(argument)) {
-            return Result<Arguments>::err(usage_error("unknown option: " + std::string{argument}));
-        }
-
-        positional.emplace_back(argument);
     }
 
     if (positional.empty()) {
@@ -233,11 +285,19 @@ Result<Arguments> parse_args(int argc, char** argv)
     if (parsed.section.has_value() && parsed.symbol.has_value()) {
         return Result<Arguments>::err(usage_error("use either a symbol or --section, not both"));
     }
-    if (parsed.json && !parsed.symbol.has_value() && !parsed.section.has_value()) {
-        return Result<Arguments>::err(usage_error("--json requires a symbol or --section"));
+    const bool has_filter =
+        parsed.grep_pattern.has_value() || parsed.calls_symbol.has_value() || parsed.contains_string.has_value();
+    if (has_filter && (parsed.symbol.has_value() || parsed.section.has_value())) {
+        return Result<Arguments>::err(usage_error("--grep/--calls/--contains filter the function list; omit a symbol or --section"));
     }
 
-    if (parsed.section.has_value()) {
+    if (parsed.xref_symbol.has_value()) {
+        parsed.action = Action::ShowXrefs;
+    } else if (parsed.stats) {
+        parsed.action = Action::ShowStats;
+    } else if (parsed.all_sections) {
+        parsed.action = Action::DisassembleAll;
+    } else if (parsed.section.has_value()) {
         parsed.action = Action::DisassembleSection;
     } else if (parsed.symbol.has_value()) {
         parsed.action = Action::DisassembleSymbol;
@@ -248,87 +308,194 @@ Result<Arguments> parse_args(int argc, char** argv)
     return Result<Arguments>::ok(std::move(parsed));
 }
 
-int run(const Arguments& args, std::ostream& out, std::ostream& err)
+namespace {
+
+disasm::Options decode_options_for(const binary::Object& object, const Arguments& args)
 {
-    const format::Options output_options = format_options(args);
+    binary::Architecture architecture = object.architecture;
+    if (args.arch.has_value()) {
+        if (const std::optional<binary::Architecture> override = arch_from_name(args.arch.value())) {
+            architecture = *override;
+        }
+    }
+    Result<disasm::Options> options = disasm::options_for(architecture, disasm::Syntax::Intel);
+    if (options) {
+        return options.value();
+    }
+    disasm::Options fallback;
+    fallback.architecture = disasm::Architecture::X86_64;
+    return fallback;
+}
 
-    if (args.action == Action::ShowHelp) {
-        return write_rendered(format::render_help(), out, err, output_options);
-    }
-    if (args.action == Action::ShowVersion) {
-        return write_rendered(format::render_banner(), out, err, output_options);
-    }
-    if (!args.file.has_value()) {
-        write_error(err, usage_error("missing file"), output_options);
-        return exit_usage;
-    }
-
-    Result<elf::File> parsed_file = elf::parse_file(args.file.value());
-    if (!parsed_file) {
-        write_error(err, parsed_file.error(), output_options);
-        return exit_file_error;
-    }
-
-    Result<resolver::Index> index = resolver::build_index(parsed_file.value());
-    if (!index) {
-        write_error(err, index.error(), output_options);
+int run_disassemble_symbol(
+    const binary::BinaryFile& file,
+    const binary::Object& object,
+    const resolver::Index& index,
+    const Arguments& args,
+    const format::Options& opts,
+    std::ostream& out,
+    std::ostream& err)
+{
+    const std::optional<TargetSymbol> target = find_target(index, file.view(), args.symbol.value());
+    if (!target.has_value()) {
+        write_missing_symbol_error(err, args.symbol.value(), file.view().source_name, object.stripped);
         return exit_disasm_error;
     }
 
-    if (args.action == Action::ListFunctions) {
-        return write_rendered(
-            format::render_function_list(parsed_file.value(), index.value(), output_options),
-            out,
-            err,
-            output_options);
+    binary::Symbol symbol;
+    symbol.address = target->address;
+    symbol.size = target->size;
+    const disasm::Options decode = decode_options_for(object, args);
+    Result<std::vector<disasm::Instruction>> decoded = disasm::disassemble_function(file, object, symbol, decode);
+    if (!decoded) {
+        write_error(err, decoded.error(), opts);
+        return exit_for(decoded.error().code);
     }
 
-    const disasm::Options decode_options = disasm_options_for(parsed_file.value());
-    std::vector<disasm::Instruction> instructions;
+    std::vector<resolver::AnnotatedInstruction> annotated = resolver::annotate(index, decoded.value());
+    return write_rendered(render_annotated(annotated, args, opts), out, err, opts);
+}
 
-    if (args.action == Action::DisassembleSymbol) {
-        if (!args.symbol.has_value()) {
-            write_error(err, internal_error("missing symbol argument"), output_options);
-            return exit_usage;
-        }
-        const std::optional<elf::Symbol> symbol = elf::find_symbol(parsed_file.value(), args.symbol.value());
-        if (!symbol.has_value()) {
-            write_missing_symbol_error(err, args.symbol.value(), parsed_file.value());
-            return exit_disasm_error;
-        }
+int run_disassemble_section(
+    const binary::BinaryFile& file,
+    const binary::Object& object,
+    const resolver::Index& index,
+    const Arguments& args,
+    const format::Options& opts,
+    std::ostream& out,
+    std::ostream& err)
+{
+    const std::optional<binary::Section> section = binary::find_section(file.view(), 0, args.section.value());
+    if (!section.has_value()) {
+        write_error(err, Error{ErrorCode::NotFound, "section not found: " + args.section.value(), 0, false}, opts);
+        return exit_file_error;
+    }
 
-        Result<std::vector<disasm::Instruction>> decoded =
-            disasm::disassemble_function(parsed_file.value(), symbol.value(), decode_options);
+    Result<binary::SectionBytes> bytes = file.section_bytes(*section);
+    if (!bytes) {
+        write_error(err, bytes.error(), opts);
+        return exit_for(bytes.error().code);
+    }
+
+    const disasm::Options decode = decode_options_for(object, args);
+    Result<std::vector<disasm::Instruction>> decoded = disasm::disassemble_section(bytes.value(), decode);
+    if (!decoded) {
+        write_error(err, decoded.error(), opts);
+        return exit_for(decoded.error().code);
+    }
+
+    std::vector<resolver::AnnotatedInstruction> annotated = resolver::annotate(index, decoded.value());
+    return write_rendered(render_annotated(annotated, args, opts), out, err, opts);
+}
+
+int run_disassemble_all(
+    const binary::BinaryFile& file,
+    const binary::Object& object,
+    const resolver::Index& index,
+    const Arguments& args,
+    const format::Options& opts,
+    std::ostream& out,
+    std::ostream& err)
+{
+    const disasm::Options decode = decode_options_for(object, args);
+    std::string combined;
+    bool any = false;
+    for (const binary::Section& section : object.sections) {
+        if (!section.executable || section.size == 0U) {
+            continue;
+        }
+        Result<binary::SectionBytes> bytes = file.section_bytes(section);
+        if (!bytes) {
+            continue;
+        }
+        Result<std::vector<disasm::Instruction>> decoded = disasm::disassemble_section(bytes.value(), decode);
         if (!decoded) {
-            write_error(err, decoded.error(), output_options);
-            return disassembly_exit_for(decoded.error().code);
+            continue;
         }
-        instructions = std::move(decoded).value();
-    } else if (args.action == Action::DisassembleSection) {
-        if (!args.section.has_value()) {
-            write_error(err, internal_error("missing section argument"), output_options);
-            return exit_usage;
+        std::vector<resolver::AnnotatedInstruction> annotated = resolver::annotate(index, decoded.value());
+        Result<std::string> rendered = render_annotated(annotated, args, opts);
+        if (!rendered) {
+            continue;
         }
-        const std::optional<elf::Section> section = elf::find_section(parsed_file.value(), args.section.value());
-        if (!section.has_value()) {
-            write_error(err, Error{ErrorCode::NotFound, "section not found: " + args.section.value(), 0, false}, output_options);
-            return exit_file_error;
+        if (any) {
+            combined += "\n";
         }
+        combined += "Section " + section.name + "\n";
+        combined += rendered.value();
+        any = true;
+    }
+    if (!any) {
+        write_error(err, Error{ErrorCode::NotFound, "no executable sections to disassemble", 0, false}, opts);
+        return exit_file_error;
+    }
+    write_line(out, combined);
+    return exit_ok;
+}
 
-        Result<std::vector<disasm::Instruction>> decoded =
-            disasm::disassemble_section(parsed_file.value(), section.value(), decode_options);
-        if (!decoded) {
-            write_error(err, decoded.error(), output_options);
-            return disassembly_exit_for(decoded.error().code);
+} // namespace
+
+int run(const Arguments& args, std::ostream& out, std::ostream& err)
+{
+    const format::Options opts = format_options(args);
+
+    if (args.action == Action::ShowHelp) {
+        if (args.help_topic.has_value()) {
+            return write_rendered(format::render_help_topic(args.help_topic.value()), out, err, opts);
         }
-        instructions = std::move(decoded).value();
-    } else {
-        write_error(err, internal_error("unsupported action"), output_options);
+        return write_rendered(format::render_help(), out, err, opts);
+    }
+    if (args.action == Action::ShowVersion) {
+        return write_rendered(format::render_version(), out, err, opts);
+    }
+    if (args.action == Action::ShowCompletions) {
+        return write_rendered(format::render_completions(args.completions_shell.value_or("bash")), out, err, opts);
+    }
+
+    if (!args.file.has_value()) {
+        write_error(err, usage_error("missing file"), opts);
         return exit_usage;
     }
 
-    std::vector<resolver::AnnotatedInstruction> annotated = resolver::annotate(index.value(), instructions);
-    return write_rendered(render_annotated(annotated, args, output_options), out, err, output_options);
+    Result<std::unique_ptr<binary::BinaryFile>> loaded = binary::load_file(args.file.value());
+    if (!loaded) {
+        write_error(err, loaded.error(), opts);
+        return exit_for(loaded.error().code);
+    }
+    const binary::BinaryFile& file = *loaded.value();
+    const std::optional<binary::Object> object = binary::primary_object(file.view());
+    if (!object.has_value()) {
+        write_error(err, Error{ErrorCode::MalformedInput, "binary contains no analyzable object", 0, false}, opts);
+        return exit_file_error;
+    }
+
+    Result<resolver::Index> index = resolver::build_index(file);
+    if (!index) {
+        write_error(err, index.error(), opts);
+        return exit_disasm_error;
+    }
+
+    switch (args.action) {
+    case Action::ListFunctions:
+        return write_rendered(format::render_function_list(file.view(), index.value(), opts), out, err, opts);
+    case Action::DisassembleSymbol:
+        return run_disassemble_symbol(file, *object, index.value(), args, opts, out, err);
+    case Action::DisassembleSection:
+        return run_disassemble_section(file, *object, index.value(), args, opts, out, err);
+    case Action::DisassembleAll:
+        return run_disassemble_all(file, *object, index.value(), args, opts, out, err);
+    case Action::ShowXrefs:
+    case Action::ShowStats:
+    case Action::Watch:
+        write_error(err, Error{ErrorCode::Internal, "this workflow is being wired up", 0, false}, opts);
+        return exit_disasm_error;
+    case Action::ShowHelp:
+    case Action::ShowVersion:
+    case Action::ShowCompletions:
+        break;
+    }
+
+    write_error(err, usage_error("unsupported action"), opts);
+    return exit_usage;
 }
 
 int main_entry(int argc, char** argv, std::ostream& out, std::ostream& err)
@@ -336,11 +503,10 @@ int main_entry(int argc, char** argv, std::ostream& out, std::ostream& err)
     Result<Arguments> parsed = parse_args(argc, argv);
     if (!parsed) {
         Arguments defaults;
-        const format::Options output_options = format_options(defaults);
-        write_error(err, parsed.error(), output_options);
+        const format::Options opts = format_options(defaults);
+        write_error(err, parsed.error(), opts);
         return exit_usage;
     }
-
     return run(parsed.value(), out, err);
 }
 

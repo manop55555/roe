@@ -242,6 +242,134 @@ Result<Index> build_index(const elf::File& file, const Options& options) {
     return Result<Index>::ok(std::move(index));
 }
 
+namespace {
+
+bool include_binary_symbol(const binary::Symbol& symbol, const Options& options) noexcept {
+    if (symbol.name.empty() || !symbol.defined) {
+        return false;
+    }
+    if (symbol.type == binary::SymbolType::File || symbol.type == binary::SymbolType::Section) {
+        return false;
+    }
+    if (symbol.name.rfind(".L", 0) == 0 || symbol.name.front() == '$') {
+        return false;
+    }
+    if (symbol.dynamic && !options.include_dynamic_symbols) {
+        return false;
+    }
+    if (symbol.bind == binary::SymbolBind::Local && !options.include_local_symbols) {
+        return false;
+    }
+    return true;
+}
+
+std::string relocation_display_for(std::string_view raw_name, std::string_view section_name, const Options& options) {
+    std::string name = display_name(raw_name, options);
+    if (name.empty()) {
+        name = section_name.empty() ? std::string{"<relocation>"} : std::string(section_name);
+    }
+    if (contains(section_name, ".plt") && !contains(name, "@plt")) {
+        name += "@plt";
+    } else if (contains(section_name, ".got") && !contains(name, "@got")) {
+        name += "@got";
+    }
+    return name;
+}
+
+} // namespace
+
+Result<Index> build_index(const binary::BinaryFile& file, const Options& options) {
+    const std::optional<binary::Object> object = binary::primary_object(file.view());
+    if (!object.has_value()) {
+        return Result<Index>::err({ErrorCode::NotFound, "binary contains no analyzable object"});
+    }
+
+    Index index;
+    index.format = object->format;
+    index.strings = object->strings;
+    index.symbols.reserve(object->symbols.size());
+    index.relocations.reserve(object->relocations.size());
+    std::vector<std::string> plt_relocation_names;
+
+    for (const binary::Symbol& symbol : object->symbols) {
+        if (!include_binary_symbol(symbol, options)) {
+            continue;
+        }
+        index.symbols.push_back(ResolvedSymbol{
+            display_name(symbol.raw_name, options),
+            symbol.raw_name,
+            symbol.address,
+            symbol.size,
+            false,
+            symbol.dynamic,
+            symbol.object_index,
+            false,
+        });
+    }
+
+    for (const binary::Relocation& relocation : object->relocations) {
+        if (is_metadata_relocation_section(relocation.section_name)) {
+            continue;
+        }
+        const std::string raw_name =
+            relocation.symbol_name.empty() ? relocation.raw_symbol_name : relocation.symbol_name;
+        if (raw_name.rfind(".L", 0) == 0) {
+            continue;
+        }
+        if (is_plt_relocation_section(relocation.section_name) && !raw_name.empty()) {
+            plt_relocation_names.push_back(raw_name);
+        }
+        index.relocations.push_back(ResolvedReference{
+            relocation.offset,
+            relocation_display_for(raw_name, relocation.section_name, options),
+            raw_name,
+            relocation.section_name,
+            relocation.type,
+            relocation.addend,
+            relocation.has_addend,
+            relocation.object_index,
+        });
+    }
+
+    const auto plt_section = std::find_if(
+        object->sections.begin(), object->sections.end(),
+        [](const binary::Section& section) { return section.name == ".plt"; });
+    if (plt_section != object->sections.end() && plt_section->address != 0U) {
+        constexpr std::uint64_t plt_entry_size = 16U;
+        std::uint64_t slot = 1U;
+        for (const std::string& raw_name : plt_relocation_names) {
+            const std::uint64_t address = plt_section->address + (slot * plt_entry_size);
+            std::string name = display_name(raw_name, options);
+            if (!contains(name, "@plt")) {
+                name += "@plt";
+            }
+            index.symbols.push_back(ResolvedSymbol{
+                std::move(name), raw_name, address, plt_entry_size, false, true, object->index, true});
+            ++slot;
+        }
+    }
+
+    std::sort(index.symbols.begin(), index.symbols.end(),
+        [](const ResolvedSymbol& lhs, const ResolvedSymbol& rhs) {
+            if (lhs.address != rhs.address) {
+                return lhs.address < rhs.address;
+            }
+            return lhs.raw_name < rhs.raw_name;
+        });
+    std::sort(index.relocations.begin(), index.relocations.end(),
+        [](const ResolvedReference& lhs, const ResolvedReference& rhs) {
+            if (lhs.address != rhs.address) {
+                return lhs.address < rhs.address;
+            }
+            if (lhs.relocation_section != rhs.relocation_section) {
+                return lhs.relocation_section < rhs.relocation_section;
+            }
+            return lhs.raw_name < rhs.raw_name;
+        });
+
+    return Result<Index>::ok(std::move(index));
+}
+
 std::optional<ResolvedSymbol> symbol_at(const Index& index, std::uint64_t address) {
     const auto it = std::lower_bound(
         index.symbols.begin(),

@@ -906,4 +906,294 @@ std::optional<SectionBytes> section_bytes(const File& file, const Section& secti
     return SectionBytes{section.address, begin, end};
 }
 
+namespace {
+
+constexpr std::uint64_t shf_write_flag = 0x1U;
+constexpr std::uint64_t shf_alloc_flag = 0x2U;
+constexpr std::uint64_t shf_strings_flag = 0x20U;
+
+binary::Architecture adapter_architecture(const File& file) noexcept
+{
+    const bool big = file.endianness == Endianness::Big;
+    const bool elf64 = file.elf_class == Class::Elf64;
+    switch (file.machine) {
+    case Machine::X86:
+        return binary::Architecture::X86;
+    case Machine::X86_64:
+        return binary::Architecture::X86_64;
+    case Machine::Arm:
+        return binary::Architecture::Arm;
+    case Machine::AArch64:
+        return binary::Architecture::AArch64;
+    case Machine::RiscV:
+        return elf64 ? binary::Architecture::RiscV64 : binary::Architecture::RiscV32;
+    case Machine::Mips:
+        if (elf64) {
+            return big ? binary::Architecture::Mips64 : binary::Architecture::Mips64el;
+        }
+        return big ? binary::Architecture::Mips32 : binary::Architecture::Mips32el;
+    case Machine::PowerPc:
+        return binary::Architecture::PowerPc32;
+    case Machine::PowerPc64:
+        return big ? binary::Architecture::PowerPc64 : binary::Architecture::PowerPc64le;
+    case Machine::Unknown:
+    case Machine::Other:
+        break;
+    }
+    return binary::Architecture::Unknown;
+}
+
+binary::ObjectKind adapter_kind(FileType type) noexcept
+{
+    switch (type) {
+    case FileType::Relocatable:
+        return binary::ObjectKind::Relocatable;
+    case FileType::Executable:
+        return binary::ObjectKind::Executable;
+    case FileType::SharedObject:
+        return binary::ObjectKind::SharedLibrary;
+    case FileType::None:
+    case FileType::Core:
+    case FileType::Other:
+        break;
+    }
+    return binary::ObjectKind::Unknown;
+}
+
+binary::SectionKind adapter_section_kind(const Section& section) noexcept
+{
+    if (section.executable) {
+        return binary::SectionKind::Code;
+    }
+    switch (section.type) {
+    case sht_symtab:
+    case sht_dynsym:
+        return binary::SectionKind::SymbolTable;
+    case sht_rel:
+    case sht_rela:
+        return binary::SectionKind::Relocation;
+    default:
+        break;
+    }
+    if (section.name.rfind(".debug", 0) == 0) {
+        return binary::SectionKind::Debug;
+    }
+    if ((section.flags & shf_strings_flag) != 0U) {
+        return binary::SectionKind::CString;
+    }
+    if ((section.flags & shf_alloc_flag) != 0U) {
+        return (section.flags & shf_write_flag) != 0U ? binary::SectionKind::Data : binary::SectionKind::ReadOnlyData;
+    }
+    return binary::SectionKind::Unknown;
+}
+
+binary::SymbolBind adapter_symbol_bind(const Symbol& symbol) noexcept
+{
+    if (symbol.dynamic && !symbol.defined) {
+        return binary::SymbolBind::Imported;
+    }
+    if (symbol.dynamic && symbol.defined && symbol.bind == SymbolBind::Global) {
+        return binary::SymbolBind::Exported;
+    }
+    switch (symbol.bind) {
+    case SymbolBind::Local:
+        return binary::SymbolBind::Local;
+    case SymbolBind::Global:
+        return binary::SymbolBind::Global;
+    case SymbolBind::Weak:
+        return binary::SymbolBind::Weak;
+    case SymbolBind::Other:
+        break;
+    }
+    return binary::SymbolBind::Other;
+}
+
+binary::SymbolType adapter_symbol_type(SymbolType type) noexcept
+{
+    switch (type) {
+    case SymbolType::NoType:
+        return binary::SymbolType::NoType;
+    case SymbolType::Object:
+        return binary::SymbolType::Object;
+    case SymbolType::Function:
+        return binary::SymbolType::Function;
+    case SymbolType::Section:
+        return binary::SymbolType::Section;
+    case SymbolType::File:
+        return binary::SymbolType::File;
+    case SymbolType::Tls:
+        return binary::SymbolType::Tls;
+    case SymbolType::Common:
+    case SymbolType::Other:
+        break;
+    }
+    return binary::SymbolType::Unknown;
+}
+
+bool printable_string_byte(std::uint8_t byte) noexcept
+{
+    return (byte >= 0x20U && byte < 0x7fU) || byte == 0x09U || byte == 0x0aU || byte == 0x0dU;
+}
+
+void extract_strings(const File& file, binary::Object& object)
+{
+    constexpr std::size_t max_strings = 200000U;
+    for (const Section& section : file.sections) {
+        const bool readonly_data = (section.flags & shf_alloc_flag) != 0U &&
+                                   (section.flags & shf_write_flag) == 0U && !section.executable;
+        if (!readonly_data || section.type == sht_nobits) {
+            continue;
+        }
+        const std::optional<SectionBytes> bytes = section_bytes(file, section);
+        if (!bytes.has_value()) {
+            continue;
+        }
+        std::string current;
+        std::uint64_t start = 0;
+        std::uint64_t offset = 0;
+        for (auto it = bytes->begin; it != bytes->end; ++it, ++offset) {
+            const std::uint8_t byte = *it;
+            if (byte == 0U) {
+                if (current.size() >= 2U) {
+                    object.strings.push_back(
+                        binary::StringLiteral{object.index, section.address + start, current.size(), current});
+                    if (object.strings.size() >= max_strings) {
+                        return;
+                    }
+                }
+                current.clear();
+            } else if (printable_string_byte(byte)) {
+                if (current.empty()) {
+                    start = offset;
+                }
+                current.push_back(static_cast<char>(byte));
+            } else {
+                current.clear();
+            }
+        }
+    }
+}
+
+class ElfBinaryFile final : public binary::BinaryFile {
+public:
+    explicit ElfBinaryFile(File file) : file_(std::move(file)) { build_view(); }
+
+    [[nodiscard]] const binary::FileView& view() const noexcept override { return view_; }
+
+    [[nodiscard]] Result<binary::SectionBytes> section_bytes(const binary::Section& section) const override
+    {
+        if (section.offset > file_.image.size() || section.size > file_.image.size() - section.offset) {
+            // An SHT_NOBITS (e.g. .bss) or out-of-image section carries no file content.
+            return Result<binary::SectionBytes>::ok(
+                binary::SectionBytes{section.object_index, section.name, section.address, {}});
+        }
+        const auto first = file_.image.begin() + static_cast<std::ptrdiff_t>(section.offset);
+        const auto last = first + static_cast<std::ptrdiff_t>(section.size);
+        return Result<binary::SectionBytes>::ok(binary::SectionBytes{
+            section.object_index, section.name, section.address, std::vector<std::uint8_t>(first, last)});
+    }
+
+private:
+    void build_view()
+    {
+        view_.source_name = file_.source_name;
+        view_.format = binary::Format::Elf;
+        const std::size_t prefix = std::min<std::size_t>(16U, file_.image.size());
+        view_.first_bytes.assign(file_.image.begin(), file_.image.begin() + static_cast<std::ptrdiff_t>(prefix));
+
+        binary::Object object;
+        object.name = file_.source_name;
+        object.index = 0;
+        object.format = binary::Format::Elf;
+        object.architecture = adapter_architecture(file_);
+        object.address_width =
+            file_.elf_class == Class::Elf64 ? binary::AddressWidth::Bits64 : binary::AddressWidth::Bits32;
+        object.endianness = file_.endianness == Endianness::Big ? binary::Endianness::Big : binary::Endianness::Little;
+        object.kind = adapter_kind(file_.file_type);
+        object.entry = file_.entry;
+        object.stripped = file_.stripped;
+
+        object.sections.reserve(file_.sections.size());
+        for (const Section& section : file_.sections) {
+            binary::Section mapped;
+            mapped.name = section.name;
+            mapped.object_index = 0;
+            mapped.index = section.index;
+            mapped.kind = adapter_section_kind(section);
+            mapped.address = section.address;
+            mapped.offset = section.offset;
+            mapped.size = section.size;
+            mapped.alignment = section.alignment;
+            mapped.readable = (section.flags & shf_alloc_flag) != 0U;
+            mapped.writable = (section.flags & shf_write_flag) != 0U;
+            mapped.executable = section.executable;
+            mapped.contains_strings = (section.flags & shf_strings_flag) != 0U;
+            object.sections.push_back(std::move(mapped));
+        }
+
+        object.symbols.reserve(file_.symbols.size());
+        for (const Symbol& symbol : file_.symbols) {
+            binary::Symbol mapped;
+            mapped.name = symbol.name;
+            mapped.raw_name = symbol.name;
+            mapped.object_index = 0;
+            mapped.address = symbol.address;
+            mapped.size = symbol.size;
+            mapped.section_index = symbol.section_index;
+            mapped.bind = adapter_symbol_bind(symbol);
+            mapped.type = adapter_symbol_type(symbol.type);
+            mapped.defined = symbol.defined;
+            mapped.dynamic = symbol.dynamic;
+            object.symbols.push_back(std::move(mapped));
+        }
+
+        object.relocations.reserve(file_.relocations.size());
+        for (const Relocation& relocation : file_.relocations) {
+            binary::Relocation mapped;
+            mapped.section_name = relocation.section_name;
+            mapped.object_index = 0;
+            mapped.offset = relocation.offset;
+            mapped.target_address = 0;
+            mapped.symbol_index = relocation.symbol_index;
+            mapped.symbol_name = relocation.symbol_name;
+            mapped.raw_symbol_name = relocation.symbol_name;
+            mapped.type = relocation.type;
+            mapped.addend = relocation.addend;
+            mapped.has_addend = relocation.has_addend;
+            mapped.encoding =
+                relocation.has_addend ? binary::RelocationEncoding::Rela : binary::RelocationEncoding::Rel;
+            object.relocations.push_back(std::move(mapped));
+        }
+
+        extract_strings(file_, object);
+
+        view_.objects.push_back(std::move(object));
+    }
+
+    File file_;
+    binary::FileView view_;
+};
+
+} // namespace
+
+Result<std::unique_ptr<binary::BinaryFile>> open_file(const std::filesystem::path& path)
+{
+    Result<File> parsed = parse_file(path);
+    if (!parsed) {
+        return Result<std::unique_ptr<binary::BinaryFile>>::err(std::move(parsed).error());
+    }
+    return Result<std::unique_ptr<binary::BinaryFile>>::ok(
+        std::make_unique<ElfBinaryFile>(std::move(parsed).value()));
+}
+
+Result<std::unique_ptr<binary::BinaryFile>> open_bytes(std::string source_name, std::vector<std::uint8_t> bytes)
+{
+    Result<File> parsed = parse_bytes(std::move(source_name), std::move(bytes));
+    if (!parsed) {
+        return Result<std::unique_ptr<binary::BinaryFile>>::err(std::move(parsed).error());
+    }
+    return Result<std::unique_ptr<binary::BinaryFile>>::ok(
+        std::make_unique<ElfBinaryFile>(std::move(parsed).value()));
+}
+
 } // namespace roe::elf
