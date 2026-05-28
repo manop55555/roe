@@ -1043,7 +1043,8 @@ void extract_strings(const File& file, binary::Object& object)
     for (const Section& section : file.sections) {
         const bool readonly_data = (section.flags & shf_alloc_flag) != 0U &&
                                    (section.flags & shf_write_flag) == 0U && !section.executable;
-        if (!readonly_data || section.type == sht_nobits) {
+        // Skip string tables (.dynstr) so symbol names don't masquerade as program strings.
+        if (!readonly_data || section.type == sht_nobits || section.type == sht_strtab) {
             continue;
         }
         const std::optional<SectionBytes> bytes = section_bytes(file, section);
@@ -1071,6 +1072,82 @@ void extract_strings(const File& file, binary::Object& object)
                 current.push_back(static_cast<char>(byte));
             } else {
                 current.clear();
+            }
+        }
+    }
+}
+
+const char* segment_type_name(std::uint32_t type) noexcept
+{
+    switch (type) {
+    case 0U: return "NULL";
+    case 1U: return "LOAD";
+    case 2U: return "DYNAMIC";
+    case 3U: return "INTERP";
+    case 4U: return "NOTE";
+    case 6U: return "PHDR";
+    case 7U: return "TLS";
+    case 0x6474e550U: return "GNU_EH_FRAME";
+    case 0x6474e551U: return "GNU_STACK";
+    case 0x6474e552U: return "GNU_RELRO";
+    case 0x6474e553U: return "GNU_PROPERTY";
+    default: return "OTHER";
+    }
+}
+
+// Map ELF program headers to normalized segments and resolve DT_NEEDED library names.
+void populate_dynamic(const File& file, binary::Object& object)
+{
+    constexpr std::uint32_t pf_x = 0x1U;
+    constexpr std::uint32_t pf_w = 0x2U;
+    constexpr std::uint32_t pf_r = 0x4U;
+    for (const Segment& segment : file.segments) {
+        binary::Segment mapped;
+        mapped.name = segment_type_name(segment.type);
+        mapped.address = segment.virtual_address;
+        mapped.offset = segment.offset;
+        mapped.size = segment.memory_size;
+        mapped.readable = (segment.flags & pf_r) != 0U;
+        mapped.writable = (segment.flags & pf_w) != 0U;
+        mapped.executable = (segment.flags & pf_x) != 0U;
+        object.segments.push_back(std::move(mapped));
+    }
+
+    const auto dynamic = std::find_if(
+        file.sections.begin(), file.sections.end(), [](const Section& s) { return s.name == ".dynamic"; });
+    const auto dynstr = std::find_if(
+        file.sections.begin(), file.sections.end(), [](const Section& s) { return s.name == ".dynstr"; });
+    if (dynamic == file.sections.end() || dynstr == file.sections.end()) {
+        return;
+    }
+    if (!range_within(dynamic->offset, dynamic->size, file.image.size()) ||
+        !range_within(dynstr->offset, dynstr->size, file.image.size())) {
+        return;
+    }
+    const Reader reader(file.image, file.endianness);
+    const bool elf64 = file.elf_class == Class::Elf64;
+    const std::uint64_t entry_size = elf64 ? 16U : 8U;
+    if (entry_size == 0U) {
+        return;
+    }
+    const std::uint64_t count = dynamic->size / entry_size;
+    for (std::uint64_t i = 0; i < count; ++i) {
+        const std::uint64_t offset = dynamic->offset + (i * entry_size);
+        const std::int64_t tag = elf64 ? reader.i64(offset).value() : reader.i32(offset).value();
+        const std::uint64_t value = elf64 ? reader.u64(offset + 8U).value() : reader.u32(offset + 4U).value();
+        if (tag == 0) {
+            break; // DT_NULL
+        }
+        if (tag == 1 && value < dynstr->size) { // DT_NEEDED
+            std::string lib;
+            std::uint64_t p = dynstr->offset + value;
+            const std::uint64_t end = dynstr->offset + dynstr->size;
+            while (p < end && file.image[static_cast<std::size_t>(p)] != 0U) {
+                lib.push_back(static_cast<char>(file.image[static_cast<std::size_t>(p)]));
+                ++p;
+            }
+            if (!lib.empty()) {
+                object.libraries.push_back(std::move(lib));
             }
         }
     }
@@ -1168,6 +1245,7 @@ private:
         }
 
         extract_strings(file_, object);
+        populate_dynamic(file_, object);
 
         view_.objects.push_back(std::move(object));
     }

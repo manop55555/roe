@@ -4,6 +4,8 @@
 #include "roe/binary.hpp"
 
 #include "roe/elf.hpp"
+#include "roe/macho.hpp"
+#include "roe/pe.hpp"
 
 #include <algorithm>
 #include <array>
@@ -74,11 +76,13 @@ Result<std::unique_ptr<BinaryFile>> load_bytes(std::string source_name, std::vec
         return elf::open_bytes(std::move(source_name), std::move(bytes));
     case Format::MachO:
     case Format::MachOFat:
+        return macho::open_bytes(std::move(source_name), std::move(bytes));
     case Format::PeCoff:
+        return pe::open_bytes(std::move(source_name), std::move(bytes));
     case Format::Archive:
         return Result<std::unique_ptr<BinaryFile>>::err(make_error(
             ErrorCode::UnsupportedFormat,
-            std::string(format_name(format)) + " was detected but this build of roe supports ELF only"));
+            "static archives are detected but not yet parsed by roe; extract members and inspect them individually"));
     case Format::Unknown:
         break;
     }

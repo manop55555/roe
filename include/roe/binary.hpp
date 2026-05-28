@@ -80,6 +80,21 @@ struct Section {
 };
 
 /**
+ * @brief A loadable region: ELF program header, Mach-O segment/load command, or
+ *        PE data directory. Normalized so --segments is one code path.
+ */
+struct Segment {
+    std::string name;
+    std::uint64_t address{0};
+    std::uint64_t offset{0};
+    std::uint64_t size{0};
+    bool readable{false};
+    bool writable{false};
+    bool executable{false};
+    std::string detail;
+};
+
+/**
  * @brief Symbol metadata normalized across static and dynamic symbol tables.
  */
 struct Symbol {
@@ -94,6 +109,7 @@ struct Symbol {
     bool defined{false};
     bool dynamic{false};
     bool synthetic{false};
+    std::string library; ///< Owning library for an import/export, when known (Mach-O dylib, PE DLL).
 };
 
 /**
@@ -136,9 +152,11 @@ struct Object {
     ObjectKind kind{ObjectKind::Unknown};
     std::uint64_t entry{0};
     std::vector<Section> sections;
+    std::vector<Segment> segments;
     std::vector<Symbol> symbols;
     std::vector<Relocation> relocations;
     std::vector<StringLiteral> strings;
+    std::vector<std::string> libraries; ///< Linked/needed libraries (ELF DT_NEEDED, Mach-O dylibs, PE import DLLs).
     bool stripped{false};
 };
 
