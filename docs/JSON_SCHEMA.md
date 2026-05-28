@@ -76,7 +76,32 @@ are `null` when absent. The schema is stable within a major version.
 }
 ```
 
-## Sections (`--json` with section listing)
+## File header (`--headers --json`)
+
+```json
+{
+  "format": "ELF",
+  "architecture": "x86-64",
+  "type": "executable",
+  "endianness": "little",
+  "bits": 64,
+  "entry": "0x1050"
+}
+```
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `format` | string | Container format (`ELF`, `Mach-O`, `PE`, …). |
+| `architecture` | string \| null | Detected architecture; `null` when no object could be loaded. |
+| `type` | string | Object kind (`executable`, `shared object`, `relocatable`, …). |
+| `endianness` | string | `little` or `big`. |
+| `bits` | number | Address width: `32` or `64`. |
+| `entry` | string | Entry-point address (hex). |
+
+When `architecture` is `null` the remaining object-derived fields (`type`,
+`endianness`, `bits`, `entry`) are omitted.
+
+## Sections (`--sections --json`, or `--json` with section listing)
 
 ```json
 {
@@ -86,3 +111,121 @@ are `null` when absent. The schema is stable within a major version.
   ]
 }
 ```
+
+Each entry: `name`, `address` (hex), `size` (number), and the `readable`,
+`writable`, `executable` permission booleans.
+
+## Segments (`--segments --json`)
+
+ELF program headers, Mach-O load commands, or PE data directories.
+
+```json
+{
+  "segments": [
+    { "name": "LOAD", "address": "0x1000", "offset": "0x1000", "size": 944,
+      "readable": true, "writable": false, "executable": true }
+  ]
+}
+```
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `name` | string | Segment/program-header/directory name. |
+| `address` | string | Virtual address (hex). |
+| `offset` | string | File offset (hex). |
+| `size` | number | Size in bytes. |
+| `readable` / `writable` / `executable` | bool | Permission flags. |
+
+## Imports (`--imports --json`)
+
+```json
+{
+  "libraries": ["libc.so.6"],
+  "imports": [
+    { "name": "printf", "library": "libc.so.6" }
+  ]
+}
+```
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `libraries` | string[] | Libraries the file depends on. |
+| `imports` | object[] | Imported symbols, sorted by library then name. |
+| `imports[].name` | string | Imported symbol name. |
+| `imports[].library` | string | Providing library (empty string if unbound). |
+
+## Exports (`--exports --json`)
+
+```json
+{
+  "exports": [
+    { "name": "roe_version", "address": "0x1130" }
+  ]
+}
+```
+
+Each entry: `name` (string) and `address` (hex).
+
+## Strings (`--strings --json`)
+
+```json
+{
+  "strings": [
+    { "address": "0x2004", "value": "hello: %d\n", "referenced": true,
+      "from": "main", "from_address": "0x11a5" },
+    { "address": "0x2010", "value": "unused", "referenced": false }
+  ]
+}
+```
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `address` | string | Address of the string (hex). |
+| `value` | string | The decoded string contents. |
+| `referenced` | bool | Whether an instruction references the string. |
+| `from` | string | Function that references it. **Present only when `referenced` is `true`.** |
+| `from_address` | string | Address of the referencing instruction (hex). **Present only when `referenced` is `true`.** |
+
+Note: unlike most optional fields, `from` and `from_address` are *omitted*
+(not set to `null`) when `referenced` is `false`.
+
+## Symbol search (`--find PATTERN --json`)
+
+```json
+{
+  "pattern": "alloc",
+  "matches": [
+    { "name": "malloc", "address": "0x1030", "source": "dynsym" }
+  ]
+}
+```
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `pattern` | string | The search pattern as given. |
+| `matches` | object[] | Fuzzy matches. |
+| `matches[].name` | string | Matched (demangled) symbol name. |
+| `matches[].address` | string | Symbol address (hex). |
+| `matches[].source` | string | Originating table: `symtab`, `dynsym`, `import`, or `export`. |
+
+## Function diff (`--diff OTHER --json`)
+
+Emitted by the summary form of `--diff` (no symbol argument). The per-function
+unified diff form, `roe NEW --diff OLD SYMBOL`, always prints text and ignores
+`--json`.
+
+```json
+{
+  "added": ["new_helper"],
+  "removed": ["old_helper"],
+  "changed": ["main"],
+  "unchanged": 12
+}
+```
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `added` | string[] | Functions present only in the current file. |
+| `removed` | string[] | Functions present only in `OTHER`. |
+| `changed` | string[] | Functions present in both but with differing bodies. |
+| `unchanged` | number | Count of functions identical in both files. |

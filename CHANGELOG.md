@@ -5,7 +5,7 @@ All notable changes to `roe` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com); this project uses
 [Semantic Versioning](https://semver.org).
 
-## [1.0.0] — 2026-05-27
+## [1.0.0] — 2026-05-28
 
 First release. `roe` is a command-line disassembler that aims to be readable by
 default, answering the LKML *"objdump output is just horrendous, not fit for
@@ -13,6 +13,34 @@ humans"* complaints (29 Oct 2025).
 
 ### Added
 
+- **Real Mach-O and PE/COFF parsing.** Mach-O (x86-64 + ARM64, thin and fat)
+  and PE/COFF (x86/x86-64/ARM64, `.exe` and `.dll`) are now parsed directly, not
+  just detected; previously only ELF was parsed. Static archives are still
+  detected but not parsed.
+- **Disassemble by address or range** on stripped binaries: `--addr <hex>`
+  walks from an address to a return/terminal or a cap, and `--range
+  <start>-<end>` covers an inclusive range.
+- **File inspection views** that need no disassembly: `--headers` (format,
+  architecture, type, entry point, endianness), `--sections` (name, size,
+  permissions, offset), `--segments` (ELF program headers / Mach-O load commands
+  / PE data directories), `--imports` (grouped by library), and `--exports`.
+- **Hex dump** with `--hex [section]` of a named section or of an `--addr` /
+  `--range` window, with `--bytes <n>` controlling the `--hex --addr` length.
+- **Function-level diff** with `--diff <other>` (added / removed / changed /
+  unchanged); with a symbol argument it emits a per-function unified diff.
+  Supports `--json` for the summary.
+- **Disassemble raw bytes from stdin** with `--raw-bytes` (requires `--arch`),
+  auto-detecting hex text vs raw binary (`--hex-input` forces hex) with an
+  optional `--base <hex>` load address.
+- **String extraction with cross-references** via `--strings`: printable runs of
+  at least `--min-len` bytes (4 by default), each shown with the instruction
+  that references it or `(no xref found)`.
+- **Fuzzy symbol search** with `--find <pattern>`: a case-insensitive search
+  across symtab, dynsym, imports, exports, and demangled names, each match
+  tagged `[symtab]`/`[dynsym]`/`[import]`/`[export]`.
+- **Pipeline ergonomics**: `--quiet`/`-q` for bare, undecorated output and
+  `--verbose`/`-v` for extra context (raw bytes, resolver provenance), with
+  `-v -v` adding debug diagnostics on stderr.
 - **Readable disassembly** of ELF binaries: relocations resolved to symbol
   names, inline branch-target previews (`je 0x35 → [L1: ...]`), generated labels
   at jump targets, preserved addresses, and raw bytes off by default.

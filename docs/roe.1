@@ -21,6 +21,29 @@ roe \- a disassembler fit for humans
 .RI [ options ]
 .br
 .B roe
+.I file
+.RB { \-\-headers | \-\-sections | \-\-segments | \-\-imports | \-\-exports }
+.RI [ options ]
+.br
+.B roe
+.I file
+.B \-\-addr
+.I hex
+.RI [ options ]
+.br
+.B roe
+.B \-\-raw\-bytes
+.B \-\-arch
+.I name
+.RI [ options ]
+.br
+.B roe
+.I file
+.B \-\-diff
+.I other
+.RI [ options ]
+.br
+.B roe
 .B \-\-completions
 .I shell
 .br
@@ -46,8 +69,31 @@ lists the functions discovered in
 .IR file .
 Given a symbol, it disassembles that single function with cross\-function calls
 resolved to symbol names, relocations annotated inline by name, and local
-branches rewritten as readable labels. ELF input is fully supported;
-Mach\-O, PE, and archive containers are recognized.
+branches rewritten as readable labels. ELF, Mach\-O (x86\-64 and ARM64, thin and
+fat), and PE/COFF (x86, x86\-64, and ARM64;
+.B .exe
+and
+.BR .dll )
+are parsed directly. Static archives are detected but not parsed.
+.PP
+Beyond disassembly,
+.B roe
+can inspect a file without listing instructions: summarize the header with
+.BR \-\-headers ,
+list
+.BR \-\-sections ", " \-\-segments ", " \-\-imports ", or " \-\-exports ,
+hex\-dump a region with
+.BR \-\-hex ,
+extract printable
+.B \-\-strings
+together with the instruction that references each, fuzzy\-search symbols with
+.BR \-\-find ,
+and diff two binaries function by function with
+.BR \-\-diff .
+Code can also be disassembled by address with
+.BR \-\-addr " or " \-\-range ,
+or read from standard input with
+.BR \-\-raw\-bytes .
 .PP
 The tool was prompted by Linus Torvalds in the Linux kernel mailing list
 thread
@@ -64,6 +110,11 @@ The name
 and this manual are a direct response to that complaint.
 .SH OPTIONS
 .TP
+.BI \-\-addr " hex"
+Disassemble starting at the given address and continue until a return or
+other terminal instruction is reached, or until an internal cap is hit. Works
+on stripped binaries, where no symbol marks the function boundary.
+.TP
 .B \-\-all ", " \-D
 Disassemble every executable section instead of listing functions.
 .TP
@@ -73,6 +124,20 @@ disambiguate, for example
 .B thumb
 or
 .BR riscv64 .
+Required with
+.BR \-\-raw\-bytes .
+.TP
+.BI \-\-base " hex"
+Base address to assign to the bytes read with
+.BR \-\-raw\-bytes .
+Defaults to 0.
+.TP
+.BI \-\-bytes " n"
+Number of bytes to dump when
+.B \-\-hex
+is combined with
+.BR \-\-addr .
+Defaults to 64.
 .TP
 .BI \-\-calls " symbol"
 List only the functions that call or branch to
@@ -87,8 +152,31 @@ one of
 List only the functions whose body references the given
 .IR string .
 .TP
+.BI \-\-diff " other"
+Compare the current file against
+.I other
+and report a function\-level diff: functions added, removed, changed, and the
+count left unchanged. When a symbol argument is also given, emit a per\-function
+unified diff of that one function instead. The summary form honors
+.BR \-\-json .
+.TP
+.B \-\-exports
+List the symbols the file exports, each with its address.
+.TP
+.BI \-\-find " pattern"
+Search every symbol table for
+.I pattern
+with a case\-insensitive fuzzy match, covering the symbol table, dynamic symbol
+table, imports, exports, and demangled names. Each match is tagged with its
+source as
+.BR [symtab] ", " [dynsym] ", " [import] ", or " [export] .
+.TP
 .BI \-\-grep " regex"
 List only the functions whose name matches the given regular expression.
+.TP
+.B \-\-headers
+Print a summary of the file header: container format, architecture, object
+type, entry point, and endianness.
 .TP
 .B \-\-help ", " \-h " [\fItopic\fP]"
 Show help and exit. An optional
@@ -96,10 +184,34 @@ Show help and exit. An optional
 selects a focused page; topics are
 .BR usage ", " formats ", " arches ", " examples ", " config ", and " json .
 .TP
+.B \-\-hex " [\fIsection\fP]"
+Print a hexadecimal and ASCII dump. With a
+.I section
+name, dump that section; otherwise dump the region selected by
+.B \-\-addr
+or
+.BR \-\-range .
+When dumping at an address, the length is governed by
+.BR \-\-bytes .
+.TP
+.B \-\-hex\-input
+Force the bytes read with
+.B \-\-raw\-bytes
+to be interpreted as hexadecimal text. Without this flag the input format is
+auto\-detected.
+.TP
+.B \-\-imports
+List the symbols the file imports, grouped by the library that provides them.
+.TP
 .B \-\-json
 Emit machine\-readable JSON instead of formatted text. Combine with
 .B \-\-no\-color
 when piping to other programs.
+.TP
+.BI \-\-min\-len " n"
+Minimum length of a run of printable characters that
+.B \-\-strings
+reports. Defaults to 4.
 .TP
 .B \-\-no\-color
 Disable ANSI color in the output, as for pipes and log files. Color is also
@@ -112,9 +224,36 @@ Do not page long output through the pager. Paging is also disabled when the
 .B NO_PAGER
 environment variable is set or when output is not a terminal.
 .TP
+.B \-\-quiet ", " \-q
+Produce bare output suitable for pipelines, omitting headers, the banner, and
+other decoration.
+.TP
+.BI \-\-range " start\-end"
+Disassemble the inclusive address range from
+.I start
+to
+.IR end .
+.TP
+.B \-\-raw\-bytes
+Disassemble bytes read from standard input rather than a file. Requires
+.BR \-\-arch .
+The input is auto\-detected as hexadecimal text or raw binary;
+.B \-\-hex\-input
+forces hexadecimal. Use
+.B \-\-base
+to set the starting address.
+.TP
 .BI \-\-section " name"
 Disassemble the named section, for example
 .IR .text ", instead of listing functions."
+.TP
+.B \-\-sections
+List the sections in the file, each with its name, size, permissions, and
+file offset.
+.TP
+.B \-\-segments
+List the program\-level layout: ELF program headers, Mach\-O load commands, or
+PE data directories.
 .TP
 .B \-\-show\-bytes
 Show the raw instruction bytes alongside each instruction. Bytes are hidden
@@ -126,6 +265,20 @@ Interleave source lines drawn from debug information with the disassembly.
 .B \-\-stats
 Print per\-function statistics: size, basic block count, branch count, and
 nesting depth.
+.TP
+.B \-\-strings
+Extract runs of printable characters at least
+.B \-\-min\-len
+bytes long (4 by default) and, for each, show the instruction that references
+it or
+.RB \(lq "(no xref found)" \(rq
+when none does.
+.TP
+.B \-\-verbose ", " \-v
+Print extra context, such as raw bytes and resolver provenance. Repeating the
+flag,
+.BR "\-v \-v" ,
+adds debug diagnostics on standard error.
 .TP
 .B \-\-version ", " \-V
 Show the version together with build information, supported architectures,
@@ -218,6 +371,46 @@ Interleave source lines from debug information:
 .RS 4
 .EX
 roe a.out main \-\-source
+.EE
+.RE
+.PP
+Disassemble a stripped function starting at an address:
+.PP
+.RS 4
+.EX
+roe a.out \-\-addr 0x4012a0
+.EE
+.RE
+.PP
+List the imported symbols grouped by their providing library:
+.PP
+.RS 4
+.EX
+roe a.out \-\-imports
+.EE
+.RE
+.PP
+Hex\-dump a section:
+.PP
+.RS 4
+.EX
+roe a.out \-\-hex .rodata
+.EE
+.RE
+.PP
+Diff two binaries function by function:
+.PP
+.RS 4
+.EX
+roe new.bin \-\-diff old.bin
+.EE
+.RE
+.PP
+Disassemble raw bytes piped on standard input:
+.PP
+.RS 4
+.EX
+echo \(aq55 48 89 e5 c3\(aq | roe \-\-raw\-bytes \-\-arch x86_64
 .EE
 .RE
 .SH EXIT STATUS
