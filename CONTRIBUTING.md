@@ -47,7 +47,7 @@ should carry the standard SPDX header:
 
 ```cpp
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The roe Authors
+// Copyright (c) 2026 manop55555
 ```
 
 ## Developer Certificate of Origin (DCO)

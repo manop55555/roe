@@ -78,7 +78,7 @@ identifying the project's own license:
 
 ```cpp
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The roe Authors
+// Copyright (c) 2026 manop55555
 ```
 
 The `Apache-2.0` identifier is the canonical SPDX short form for the Apache

@@ -50,7 +50,7 @@ Fuzzer builds also add `-fsanitize=fuzzer,address,undefined` to fuzzer targets.
 
 ## Known Limitations
 
-- The current fuzz harness targets the ELF parser and parser accessors only. It does not yet fuzz disassembly, formatting, CLI argument parsing, or resolver annotation pipelines.
+- The fuzz harnesses target the ELF, Mach-O, and PE/COFF parsers and the binary loader. Disassembly, formatting, CLI argument parsing, and resolver annotation are covered by the unit and integration suites rather than by fuzzing.
 - The checked-in repository does not include large binary corpora. Corpus seeds are generated locally by `fuzz/generate_corpus.sh`.
 - `roe` is a local command-line tool. It has no network listener, privilege boundary, sandbox, or automatic update channel.
 

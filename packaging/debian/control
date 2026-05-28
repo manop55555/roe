@@ -9,7 +9,7 @@ Build-Depends:
  libcapstone-dev,
  pkg-config
 Standards-Version: 4.6.2
-Homepage: https://github.com/USER/roe
+Homepage: https://github.com/manop55555/roe
 Rules-Requires-Root: no
 
 Package: roe

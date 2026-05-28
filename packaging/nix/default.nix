@@ -11,7 +11,7 @@ stdenv.mkDerivation (finalAttrs: {
   version = "1.0.0";
 
   src = fetchFromGitHub {
-    owner = "USER";
+    owner = "manop55555";
     repo = "roe";
     rev = "v${finalAttrs.version}";
     # Hash is filled in at release time.
@@ -27,7 +27,7 @@ stdenv.mkDerivation (finalAttrs: {
 
   meta = with lib; {
     description = "A disassembler fit for humans";
-    homepage = "https://github.com/USER/roe";
+    homepage = "https://github.com/manop55555/roe";
     license = licenses.asl20;
     mainProgram = "roe";
     platforms = platforms.unix;

@@ -4,12 +4,12 @@ pkgname=roe
 pkgver=1.0.0
 pkgrel=0
 pkgdesc="A disassembler fit for humans"
-url="https://github.com/USER/roe"
+url="https://github.com/manop55555/roe"
 arch="all"
 license="Apache-2.0"
 makedepends="cmake g++ capstone-dev pkgconf"
 subpackages="$pkgname-doc"
-source="$pkgname-$pkgver.tar.gz::https://github.com/USER/roe/archive/refs/tags/v$pkgver.tar.gz"
+source="$pkgname-$pkgver.tar.gz::https://github.com/manop55555/roe/archive/refs/tags/v$pkgver.tar.gz"
 builddir="$srcdir/$pkgname-$pkgver"
 
 build() {

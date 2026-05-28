@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The roe Authors
+// Copyright (c) 2026 manop55555
 
 // Exercises the full roe pipeline from untrusted bytes: format detection, ELF
 // parsing and normalization, resolver index construction, and disassembly of the

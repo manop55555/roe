@@ -4,7 +4,7 @@ project(
     roe
     VERSION 1.0.0
     DESCRIPTION "A disassembler fit for humans"
-    HOMEPAGE_URL "https://github.com/USER/roe"
+    HOMEPAGE_URL "https://github.com/manop55555/roe"
     LANGUAGES CXX
 )
 

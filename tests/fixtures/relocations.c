@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright (c) 2026 manop55555 */
 extern int external_function(int value);
 
 int global_counter = 7;

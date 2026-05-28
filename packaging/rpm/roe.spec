@@ -4,8 +4,8 @@ Release:        1%{?dist}
 Summary:        A disassembler fit for humans
 
 License:        Apache-2.0
-URL:            https://github.com/USER/roe
-Source0:        https://github.com/USER/roe/archive/refs/tags/v%{version}.tar.gz#/%{name}-%{version}.tar.gz
+URL:            https://github.com/manop55555/roe
+Source0:        https://github.com/manop55555/roe/archive/refs/tags/v%{version}.tar.gz#/%{name}-%{version}.tar.gz
 
 BuildRequires:  cmake
 BuildRequires:  gcc-c++

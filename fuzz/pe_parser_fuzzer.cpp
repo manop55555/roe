@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The roe Authors
+// Copyright (c) 2026 manop55555
 
 // Fuzz the PE/COFF parser directly from untrusted bytes, exercising the import
 // and export table walks (RVA translation), the COFF symbol/string-table walk,

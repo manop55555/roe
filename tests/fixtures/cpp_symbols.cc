@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 manop55555
+
 namespace fixture {
 
 class Worker {

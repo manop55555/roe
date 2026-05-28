@@ -352,11 +352,11 @@ roe a.out main \-\-json \-\-no\-color | jq .
 .EE
 .RE
 .PP
-Find C++ methods by matching the function names against a regular expression:
+Find C++ methods by fuzzy\-matching their demangled names:
 .PP
 .RS 4
 .EX
-roe libfoo.so \-\-grep \(aq::\(aq
+roe libfoo.so \-\-find \(aq::\(aq
 .EE
 .RE
 .PP
@@ -492,11 +492,11 @@ environment variable.
 .BR addr2line (1)
 .SH BUGS
 Report bugs at
-.UR https://github.com/USER/roe
+.UR https://github.com/manop55555/roe
 the project issue tracker
 .UE .
 .SH AUTHORS
-The roe Authors.
+manop55555.
 .SH COPYRIGHT
-Copyright 2026 The roe Authors. Licensed under the Apache License, Version 2.0
+Copyright (c) 2026 manop55555. Licensed under the Apache License, Version 2.0
 .RB ( Apache\-2.0 ).

@@ -4,11 +4,11 @@ pkgver=1.0.0
 pkgrel=1
 pkgdesc="A disassembler fit for humans"
 arch=('x86_64' 'aarch64')
-url="https://github.com/USER/roe"
+url="https://github.com/manop55555/roe"
 license=('Apache-2.0')
 depends=('capstone')
 makedepends=('cmake')
-source=("$pkgname-$pkgver.tar.gz::https://github.com/USER/roe/archive/refs/tags/v$pkgver.tar.gz")
+source=("$pkgname-$pkgver.tar.gz::https://github.com/manop55555/roe/archive/refs/tags/v$pkgver.tar.gz")
 # Checksum is filled in at release time.
 sha256sums=('0000000000000000000000000000000000000000000000000000000000000000')
 

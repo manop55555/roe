@@ -93,4 +93,4 @@ humans"* complaints (29 Oct 2025).
   malformed PE cannot force unbounded parsing work. Surfaced by the libFuzzer PE
   harness and locked in place by a regression seed and a unit test.
 
-[1.0.0]: https://github.com/USER/roe/releases/tag/v1.0.0
+[1.0.0]: https://github.com/manop55555/roe/releases/tag/v1.0.0

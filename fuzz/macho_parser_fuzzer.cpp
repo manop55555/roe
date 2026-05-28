@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The roe Authors
+// Copyright (c) 2026 manop55555
 
 // Fuzz the Mach-O parser directly from untrusted bytes, including fat dispatch
 // and the BinaryFile adapter's section_bytes. Run with libFuzzer + ASan/UBSan.

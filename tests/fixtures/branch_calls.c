@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright (c) 2026 manop55555 */
 #include <stdio.h>
 
 __attribute__((noinline)) int branchy(int value)

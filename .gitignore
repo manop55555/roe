@@ -19,8 +19,7 @@ coverage/
 core
 crash-*
 id:*
-scratch/*
-!scratch/.gitkeep
+scratch/
 
 # libFuzzer-generated corpus entries (hash-named); keep only the checked-in seeds
 fuzz/corpus/**
@@ -38,5 +37,5 @@ tests/fixtures/sample.pe_*
 tests/fixtures/shellcode.hex
 !fuzz/corpus/macho/regression-extract-strings-overflow
 !fuzz/corpus/pe/regression-export-name-budget
-.antigravitycli/
 TEST_REPORT.md
+v1-plan.md

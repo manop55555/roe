@@ -1,7 +1,7 @@
 class Roe < Formula
   desc "A disassembler fit for humans"
-  homepage "https://github.com/USER/roe"
-  url "https://github.com/USER/roe/archive/refs/tags/v1.0.0.tar.gz"
+  homepage "https://github.com/manop55555/roe"
+  url "https://github.com/manop55555/roe/archive/refs/tags/v1.0.0.tar.gz"
   # Checksum is filled in at release time.
   sha256 "0000000000000000000000000000000000000000000000000000000000000000"
   license "Apache-2.0"

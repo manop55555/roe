@@ -14,7 +14,7 @@
 set -eu
 
 VERSION="${VERSION:-1.0.0}"
-REPO="USER/roe"
+REPO="manop55555/roe"
 BASE_URL="https://github.com/${REPO}/releases/download/v${VERSION}"
 
 log() {

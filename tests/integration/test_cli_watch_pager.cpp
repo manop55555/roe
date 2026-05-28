@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The roe Authors
+// Copyright (c) 2026 manop55555
 //
 // End-to-end coverage for the two features that were previously exercised only
 // by hand: --watch (re-run on file change) and the pager (spawned on a TTY,

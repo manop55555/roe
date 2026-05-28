@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The roe Authors
+// Copyright (c) 2026 manop55555
 #include "roe/format.hpp"
 
 #include "roe/version.hpp"
@@ -424,7 +424,7 @@ Result<std::string> render_help()
     out << "  roe new.bin --diff old.bin             function-level diff\n";
     out << "  echo '55 48 89 e5 c3' | roe --raw-bytes --arch x86_64\n\n";
 
-    out << "See 'man roe' or https://github.com/USER/roe for the full manual.\n";
+    out << "See 'man roe' or https://github.com/manop55555/roe for the full manual.\n";
     return Result<std::string>::ok(out.str());
 }
 

@@ -1,22 +1,22 @@
 {
     "version": "1.0.0",
     "description": "A disassembler fit for humans",
-    "homepage": "https://github.com/USER/roe",
+    "homepage": "https://github.com/manop55555/roe",
     "license": "Apache-2.0",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/USER/roe/releases/download/v1.0.0/roe-1.0.0-windows-x64.zip",
+            "url": "https://github.com/manop55555/roe/releases/download/v1.0.0/roe-1.0.0-windows-x64.zip",
             "hash": "0000000000000000000000000000000000000000000000000000000000000000"
         }
     },
     "bin": "roe.exe",
     "checkver": {
-        "github": "https://github.com/USER/roe"
+        "github": "https://github.com/manop55555/roe"
     },
     "autoupdate": {
         "architecture": {
             "64bit": {
-                "url": "https://github.com/USER/roe/releases/download/v$version/roe-$version-windows-x64.zip"
+                "url": "https://github.com/manop55555/roe/releases/download/v$version/roe-$version-windows-x64.zip"
             }
         }
     },

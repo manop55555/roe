@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The roe Authors
+// Copyright (c) 2026 manop55555
 #pragma once
 
 // roe's test suite uses Catch2 v3. CMake provides Catch2 via find_package or, as a
