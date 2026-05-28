@@ -38,12 +38,14 @@ TEST_CASE("format and architecture names are stable", "[binary]")
     CHECK(architecture_name(Architecture::RiscV64) == "riscv64");
 }
 
-TEST_CASE("load_bytes reports non-ELF formats honestly", "[binary]")
+TEST_CASE("load_bytes reports a detected-but-unparsed format honestly", "[binary]")
 {
-    const roe::Result<std::unique_ptr<BinaryFile>> result = load_bytes("stub.exe", {'M', 'Z', 0, 0, 0, 0});
+    // ELF, Mach-O, and PE are parsed; static archives are detected but not parsed.
+    const roe::Result<std::unique_ptr<BinaryFile>> result =
+        load_bytes("lib.a", {'!', '<', 'a', 'r', 'c', 'h', '>', '\n', 0, 0});
     REQUIRE_FALSE(result.has_value());
     CHECK(result.error().code == roe::ErrorCode::UnsupportedFormat);
-    CHECK(result.error().message.find("PE/COFF") != std::string::npos);
+    CHECK(result.error().message.find("archive") != std::string::npos);
 }
 
 TEST_CASE("load_bytes reports unknown formats with a hex dump", "[binary]")

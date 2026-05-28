@@ -194,6 +194,55 @@ if(ROE_BUILD_TESTS)
         VERBATIM)
     list(APPEND ROE_FIXTURE_OUTPUTS "${ROE_FIXTURE_NODEBUG}")
     list(APPEND ROE_FIXTURE_DEFINES ROE_FIXTURE_NODEBUG="${ROE_FIXTURE_NODEBUG}")
+
+    # Diff fixtures (two versions with a changed function).
+    set(ROE_FIXTURE_V1 "${ROE_FIXTURE_BIN_DIR}/v1.elf64")
+    set(ROE_FIXTURE_V2 "${ROE_FIXTURE_BIN_DIR}/v2.elf64")
+    add_custom_command(OUTPUT "${ROE_FIXTURE_V1}"
+        COMMAND "${CMAKE_CXX_COMPILER}" -x c -O1 -g -o "${ROE_FIXTURE_V1}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/v1.c"
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/v1.c" VERBATIM)
+    add_custom_command(OUTPUT "${ROE_FIXTURE_V2}"
+        COMMAND "${CMAKE_CXX_COMPILER}" -x c -O1 -g -o "${ROE_FIXTURE_V2}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/v2.c"
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/v2.c" VERBATIM)
+    list(APPEND ROE_FIXTURE_OUTPUTS "${ROE_FIXTURE_V1}" "${ROE_FIXTURE_V2}")
+    list(APPEND ROE_FIXTURE_DEFINES ROE_FIXTURE_V1="${ROE_FIXTURE_V1}" ROE_FIXTURE_V2="${ROE_FIXTURE_V2}")
+
+    # Mach-O object fixture (clang cross-target), if clang is available.
+    find_program(ROE_CLANG NAMES clang)
+    if(ROE_CLANG)
+        set(ROE_FIXTURE_MACHO "${ROE_FIXTURE_BIN_DIR}/sample.macho_arm64")
+        add_custom_command(OUTPUT "${ROE_FIXTURE_MACHO}"
+            COMMAND "${ROE_CLANG}" --target=arm64-apple-macos11 -O1 -c -o "${ROE_FIXTURE_MACHO}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/macho_sample.c"
+            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/macho_sample.c" VERBATIM)
+        set(ROE_FIXTURE_MACHO_X64 "${ROE_FIXTURE_BIN_DIR}/sample.macho_x86_64")
+        add_custom_command(OUTPUT "${ROE_FIXTURE_MACHO_X64}"
+            COMMAND "${ROE_CLANG}" --target=x86_64-apple-macos11 -O1 -c -o "${ROE_FIXTURE_MACHO_X64}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/macho_sample.c"
+            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/macho_sample.c" VERBATIM)
+        list(APPEND ROE_FIXTURE_OUTPUTS "${ROE_FIXTURE_MACHO}" "${ROE_FIXTURE_MACHO_X64}")
+        list(APPEND ROE_FIXTURE_DEFINES ROE_FIXTURE_MACHO="${ROE_FIXTURE_MACHO}"
+            ROE_FIXTURE_MACHO_X64="${ROE_FIXTURE_MACHO_X64}")
+    else()
+        list(APPEND ROE_FIXTURE_DEFINES ROE_FIXTURE_MACHO="" ROE_FIXTURE_MACHO_X64="")
+    endif()
+
+    # PE fixtures (mingw), if available.
+    find_program(ROE_MINGW NAMES x86_64-w64-mingw32-gcc)
+    if(ROE_MINGW)
+        set(ROE_FIXTURE_PE "${ROE_FIXTURE_BIN_DIR}/sample.pe_x64")
+        set(ROE_FIXTURE_PE_DLL "${ROE_FIXTURE_BIN_DIR}/sample.pe_dll")
+        add_custom_command(OUTPUT "${ROE_FIXTURE_PE}"
+            COMMAND "${ROE_MINGW}" -O1 -o "${ROE_FIXTURE_PE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/with_strings.c"
+            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/with_strings.c" VERBATIM)
+        add_custom_command(OUTPUT "${ROE_FIXTURE_PE_DLL}"
+            COMMAND "${ROE_MINGW}" -O1 -shared -o "${ROE_FIXTURE_PE_DLL}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/pe_dll.c"
+            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/pe_dll.c" VERBATIM)
+        list(APPEND ROE_FIXTURE_OUTPUTS "${ROE_FIXTURE_PE}" "${ROE_FIXTURE_PE_DLL}")
+        list(APPEND ROE_FIXTURE_DEFINES ROE_FIXTURE_PE="${ROE_FIXTURE_PE}" ROE_FIXTURE_PE_DLL="${ROE_FIXTURE_PE_DLL}")
+    else()
+        list(APPEND ROE_FIXTURE_DEFINES ROE_FIXTURE_PE="" ROE_FIXTURE_PE_DLL="")
+    endif()
     if(EXISTS "${ROE_FIXTURE_CPP_SRC}")
         add_custom_command(
             OUTPUT "${ROE_FIXTURE_CPP}"
