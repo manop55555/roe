@@ -158,7 +158,9 @@ void extract_strings(const std::vector<std::uint8_t>& image, binary::Object& obj
     for (const binary::Section& section : object.sections) {
         const bool stringy = section.kind == binary::SectionKind::CString ||
                              section.kind == binary::SectionKind::ReadOnlyData;
-        if (!stringy || section.offset == 0 || section.offset + section.size > image.size()) {
+        // Overflow-safe range check: section.offset + section.size must not exceed the image.
+        if (!stringy || section.offset == 0 || section.offset > image.size() ||
+            section.size > image.size() - section.offset) {
             continue;
         }
         std::string current;

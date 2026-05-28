@@ -15,12 +15,14 @@ target="${1:-elf}"
 runs="${2:-1000000}"
 build_dir="${ROE_FUZZ_BUILD_DIR:-build-fuzz}"
 
+seed=""
 case "${target}" in
     elf)     fuzzer="elf_parser_fuzzer";    corpus="fuzz/corpus/elf_parser" ;;
     binary)  fuzzer="binary_loader_fuzzer"; corpus="fuzz/corpus/binary_loader" ;;
-    macho|pe|archive)
-        echo "roe parses ELF only in this build; ${target} is detected but not parsed," >&2
-        echo "so there is no ${target} fuzzer. Run './scripts/fuzz.sh elf' or 'binary'." >&2
+    macho)   fuzzer="macho_parser_fuzzer";  corpus="fuzz/corpus/macho"; seed="tests/fixtures/sample.macho_arm64" ;;
+    pe)      fuzzer="pe_parser_fuzzer";     corpus="fuzz/corpus/pe"; seed="tests/fixtures/sample.pe_x64" ;;
+    archive)
+        echo "roe detects static archives but does not parse them; there is no archive fuzzer." >&2
         exit 0 ;;
     *)
         echo "unknown fuzz target: ${target} (use elf, binary, macho, pe, or archive)" >&2
@@ -39,5 +41,8 @@ CC="${CC:-clang}" CXX="${CXX:-clang++}" cmake -S . -B "${build_dir}" \
 cmake --build "${build_dir}" -j "${ROE_JOBS:-$(nproc)}" --target "${fuzzer}" >/dev/null
 
 mkdir -p "${corpus}"
+if [ -n "${seed}" ] && [ -f "${seed}" ]; then
+    cp -n "${seed}" "${corpus}/seed" 2>/dev/null || true
+fi
 echo "Fuzzing ${fuzzer} for ${runs} runs (corpus: ${corpus})"
 exec "./${build_dir}/${fuzzer}" -runs="${runs}" -max_len=1048576 "${corpus}"

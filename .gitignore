@@ -36,3 +36,4 @@ tests/fixtures/*.elf64
 tests/fixtures/*.macho_*
 tests/fixtures/sample.pe_*
 tests/fixtures/shellcode.hex
+!fuzz/corpus/macho/regression-extract-strings-overflow
