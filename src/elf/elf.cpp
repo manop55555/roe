@@ -1246,6 +1246,15 @@ private:
 
         extract_strings(file_, object);
         populate_dynamic(file_, object);
+        // A PIE executable is ET_DYN but has a program interpreter; report it as executable.
+        if (object.kind == binary::ObjectKind::SharedLibrary) {
+            for (const binary::Segment& segment : object.segments) {
+                if (segment.name == "INTERP") {
+                    object.kind = binary::ObjectKind::Executable;
+                    break;
+                }
+            }
+        }
 
         view_.objects.push_back(std::move(object));
     }

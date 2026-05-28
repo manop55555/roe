@@ -814,7 +814,7 @@ std::vector<std::uint8_t> parse_hex_bytes(const std::vector<std::uint8_t>& bytes
         return c - 'A' + 10;
     };
     std::vector<std::uint8_t> out;
-    for (std::size_t i = 0; i + 1 < digits.size() + 1 && i + 1 < digits.size(); i += 2) {
+    for (std::size_t i = 0; i + 1 < digits.size(); i += 2) {
         out.push_back(static_cast<std::uint8_t>((value(digits[i]) * 16) + value(digits[i + 1])));
     }
     return out;
