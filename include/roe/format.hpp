@@ -37,6 +37,8 @@ struct Options {
     bool preserve_addresses{true};
     bool show_bytes{false};
     bool source{false};
+    bool quiet{false};
+    int verbose{0};
 };
 
 /**
@@ -129,8 +131,49 @@ Result<std::string> render_stats(const std::vector<features::FunctionStats>& sta
 Result<std::string> render_sections(const binary::FileView& file, const Options& options);
 
 /**
+ * @brief Render the file header summary (format, architecture, type, entry).
+ */
+Result<std::string> render_headers(const binary::FileView& file, const Options& options);
+
+/**
+ * @brief Render loadable segments (ELF program headers / Mach-O segments / PE data dirs).
+ */
+Result<std::string> render_segments(const binary::FileView& file, const Options& options);
+
+/**
+ * @brief Render imported symbols grouped by their owning library where known.
+ */
+Result<std::string> render_imports(const binary::FileView& file, const Options& options);
+
+/**
+ * @brief Render exported symbols.
+ */
+Result<std::string> render_exports(const binary::FileView& file, const Options& options);
+
+/**
  * @brief Generate a shell completion script for bash, zsh, fish, or PowerShell.
  */
 Result<std::string> render_completions(const std::string& shell);
+
+/**
+ * @brief Render a hex + ASCII dump of bytes starting at a base address.
+ */
+Result<std::string> render_hex(const std::vector<std::uint8_t>& bytes, std::uint64_t base, const Options& options);
+
+/**
+ * @brief Render extracted strings with their referencing instruction.
+ */
+Result<std::string> render_strings(const std::vector<features::StringRef>& refs, const Options& options);
+
+/**
+ * @brief Render --find matches tagged by symbol source.
+ */
+Result<std::string> render_find(
+    const std::vector<features::FindMatch>& matches, const std::string& pattern, const Options& options);
+
+/**
+ * @brief Render a function-level diff summary.
+ */
+Result<std::string> render_diff(const features::DiffResult& result, const Options& options);
 
 } // namespace roe::format

@@ -88,6 +88,49 @@ struct FunctionBody {
 };
 
 /**
+ * @brief A string literal and the instruction (if any) that references it.
+ */
+struct StringRef {
+    std::uint64_t address{0};
+    std::string value;
+    std::string from_function;
+    std::uint64_t from_address{0};
+    bool referenced{false};
+};
+
+/**
+ * @brief A symbol matched by --find, tagged with its source table.
+ */
+struct FindMatch {
+    std::string name;
+    std::uint64_t address{0};
+    std::string source; // symtab | dynsym | import | export
+};
+
+/**
+ * @brief Function-level difference between two binaries.
+ */
+struct DiffResult {
+    std::vector<std::string> added;
+    std::vector<std::string> removed;
+    std::vector<std::string> changed;
+    std::uint64_t unchanged{0};
+};
+
+/**
+ * @brief Collect string literals (>= min_len) with their referencing instruction.
+ */
+std::vector<StringRef> find_string_references(
+    const std::vector<binary::StringLiteral>& strings,
+    const std::vector<FunctionBody>& functions,
+    std::uint64_t min_len);
+
+/**
+ * @brief Compute the function-level diff between two function-body sets.
+ */
+DiffResult diff_functions(const std::vector<FunctionBody>& old_functions, const std::vector<FunctionBody>& new_functions);
+
+/**
  * @brief Apply regex filtering to function symbols.
  */
 Result<std::vector<binary::Symbol>> filter_functions(

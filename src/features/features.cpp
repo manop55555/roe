@@ -226,6 +226,97 @@ std::vector<FunctionStats> compute_stats(const std::vector<FunctionBody>& functi
     return stats;
 }
 
+std::vector<StringRef> find_string_references(
+    const std::vector<binary::StringLiteral>& strings,
+    const std::vector<FunctionBody>& functions,
+    std::uint64_t min_len)
+{
+    std::vector<StringRef> refs;
+    for (const binary::StringLiteral& literal : strings) {
+        if (literal.value.size() < min_len) {
+            continue;
+        }
+        StringRef ref;
+        ref.address = literal.address;
+        ref.value = literal.value;
+        for (const FunctionBody& function : functions) {
+            for (const resolver::AnnotatedInstruction& annotated : function.instructions) {
+                if (annotated.string_reference.has_value() && annotated.string_reference->address == literal.address) {
+                    ref.referenced = true;
+                    ref.from_function = function.symbol.name;
+                    ref.from_address = annotated.instruction.address;
+                    break;
+                }
+            }
+            if (ref.referenced) {
+                break;
+            }
+        }
+        refs.push_back(std::move(ref));
+    }
+    return refs;
+}
+
+DiffResult diff_functions(const std::vector<FunctionBody>& old_functions, const std::vector<FunctionBody>& new_functions)
+{
+    const auto signature = [](const FunctionBody& function) {
+        std::string text;
+        for (const resolver::AnnotatedInstruction& annotated : function.instructions) {
+            text += annotated.instruction.mnemonic;
+            text += ' ';
+            text += annotated.instruction.operands;
+            text += '\n';
+        }
+        return text;
+    };
+
+    std::map<std::string, std::string> old_by_name;
+    std::map<std::string, std::string> new_by_name;
+    for (const FunctionBody& function : old_functions) {
+        old_by_name[function.symbol.name] = signature(function);
+    }
+    for (const FunctionBody& function : new_functions) {
+        new_by_name[function.symbol.name] = signature(function);
+    }
+
+    DiffResult result;
+    for (const auto& [name, sig] : new_by_name) {
+        const auto found = old_by_name.find(name);
+        if (found == old_by_name.end()) {
+            result.added.push_back(name);
+        } else if (found->second != sig) {
+            result.changed.push_back(name);
+        } else {
+            ++result.unchanged;
+        }
+    }
+    for (const auto& [name, sig] : old_by_name) {
+        static_cast<void>(sig);
+        if (new_by_name.find(name) == new_by_name.end()) {
+            result.removed.push_back(name);
+        }
+    }
+
+    // Fuzzy fallback: an added and a removed function with identical bodies is a rename.
+    for (auto added = result.added.begin(); added != result.added.end();) {
+        const std::string& sig = new_by_name[*added];
+        auto match = std::find_if(result.removed.begin(), result.removed.end(),
+            [&](const std::string& removed) { return old_by_name[removed] == sig; });
+        if (match != result.removed.end()) {
+            result.changed.push_back(*match + " -> " + *added);
+            result.removed.erase(match);
+            added = result.added.erase(added);
+        } else {
+            ++added;
+        }
+    }
+
+    std::sort(result.added.begin(), result.added.end());
+    std::sort(result.removed.begin(), result.removed.end());
+    std::sort(result.changed.begin(), result.changed.end());
+    return result;
+}
+
 std::vector<resolver::AnnotatedInstruction> annotate_string_references(
     const binary::Object& object,
     const std::vector<resolver::AnnotatedInstruction>& instructions)

@@ -9,6 +9,7 @@
 
 #include "roe/core.hpp"
 
+#include <cstdint>
 #include <filesystem>
 #include <iosfwd>
 #include <optional>
@@ -27,8 +28,20 @@ enum class Action {
     DisassembleSymbol,
     DisassembleSection,
     DisassembleAll,
+    DisassembleAddr,
+    DisassembleRange,
+    RawBytes,
     ShowXrefs,
     ShowStats,
+    ShowHeaders,
+    ShowSections,
+    ShowSegments,
+    ShowImports,
+    ShowExports,
+    ShowHex,
+    ShowStrings,
+    ShowFind,
+    ShowDiff,
     Watch
 };
 
@@ -47,6 +60,15 @@ struct Arguments {
     std::optional<std::string> contains_string;
     std::optional<std::string> xref_symbol;
     std::optional<std::string> arch;
+    std::optional<std::string> find_pattern;
+    std::optional<std::string> hex_section;
+    std::optional<std::filesystem::path> diff_other;
+    std::optional<std::uint64_t> addr;
+    std::optional<std::uint64_t> range_start;
+    std::optional<std::uint64_t> range_end;
+    std::optional<std::uint64_t> bytes_count;
+    std::optional<std::uint64_t> base;
+    std::optional<std::uint64_t> min_len;
     bool no_color{false};
     bool no_pager{false};
     bool json{false};
@@ -55,6 +77,17 @@ struct Arguments {
     bool all_sections{false};
     bool stats{false};
     bool watch{false};
+    bool headers{false};
+    bool sections{false};
+    bool segments{false};
+    bool imports{false};
+    bool exports{false};
+    bool hex{false};
+    bool strings{false};
+    bool raw_bytes{false};
+    bool hex_input{false};
+    bool quiet{false};
+    int verbose{0};
 };
 
 inline constexpr int exit_ok = 0;

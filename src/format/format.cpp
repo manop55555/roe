@@ -439,7 +439,9 @@ Result<std::string> render_function_list(
     });
 
     std::ostringstream out;
-    out << colorize("Functions", ansi_bold, options) << " in " << file.source_name << "\n";
+    if (!options.quiet) {
+        out << colorize("Functions", ansi_bold, options) << " in " << file.source_name << "\n";
+    }
     if (functions.empty() && !index.symbols.empty()) {
         std::vector<resolver::ResolvedSymbol> symbols = index.symbols;
         std::sort(
@@ -454,7 +456,7 @@ Result<std::string> render_function_list(
         for (const resolver::ResolvedSymbol& symbol : symbols) {
             out << padded_hex_address(symbol.address) << "  ";
             out << std::setw(8) << std::dec << symbol.size << "  " << symbol.name;
-            if (symbol.dynamic) {
+            if (symbol.dynamic && !options.quiet) {
                 out << " " << colorize("[dyn]", ansi_dim, options);
             }
             out << "\n";
@@ -466,7 +468,7 @@ Result<std::string> render_function_list(
         out << padded_hex_address(function.address) << "  ";
         out << std::setw(8) << std::dec << function.size << "  ";
         out << display_name_for_function(function, index);
-        if (function.dynamic) {
+        if (function.dynamic && !options.quiet) {
             out << " " << colorize("[dyn]", ansi_dim, options);
         }
         out << "\n";
@@ -510,7 +512,9 @@ Result<std::string> render_function_list(
     };
 
     std::ostringstream out;
-    out << colorize("Functions", ansi_bold, options) << " in " << file.source_name << "\n";
+    if (!options.quiet) {
+        out << colorize("Functions", ansi_bold, options) << " in " << file.source_name << "\n";
+    }
     if (functions.empty() && !index.symbols.empty()) {
         std::vector<resolver::ResolvedSymbol> symbols = index.symbols;
         std::sort(symbols.begin(), symbols.end(),
@@ -523,7 +527,7 @@ Result<std::string> render_function_list(
         for (const resolver::ResolvedSymbol& symbol : symbols) {
             out << padded_hex_address(symbol.address) << "  ";
             out << std::setw(8) << std::dec << symbol.size << "  " << symbol.name;
-            if (symbol.dynamic) {
+            if (symbol.dynamic && !options.quiet) {
                 out << " " << colorize("[dyn]", ansi_dim, options);
             }
             out << "\n";
@@ -535,7 +539,7 @@ Result<std::string> render_function_list(
         out << padded_hex_address(function.address) << "  ";
         out << std::setw(8) << std::dec << function.size << "  ";
         out << display_for(function);
-        if (function.dynamic) {
+        if (function.dynamic && !options.quiet) {
             out << " " << colorize("[dyn]", ansi_dim, options);
         }
         out << "\n";
@@ -567,11 +571,13 @@ Result<std::string> render_function_table(
     };
 
     std::ostringstream out;
-    out << colorize(heading, ansi_bold, options) << "\n";
+    if (!options.quiet) {
+        out << colorize(heading, ansi_bold, options) << "\n";
+    }
     for (const binary::Symbol& function : sorted) {
         out << padded_hex_address(function.address) << "  ";
         out << std::setw(8) << std::dec << function.size << "  " << display_for(function);
-        if (function.dynamic) {
+        if (function.dynamic && !options.quiet) {
             out << " " << colorize("[dyn]", ansi_dim, options);
         }
         out << "\n";
@@ -677,6 +683,9 @@ Result<std::string> render_disassembly(
         if (annotated.reference.has_value()) {
             out << "  " << colorize("; ref ", ansi_cyan, options) << annotated.reference->name;
             out << " @" << hex_address(annotated.reference->address);
+            if (options.verbose >= 1 && !annotated.reference->relocation_section.empty()) {
+                out << " " << colorize("[" + annotated.reference->relocation_section + "]", ansi_dim, options);
+            }
         }
         if (annotated.string_reference.has_value()) {
             out << "  " << colorize("; ", ansi_cyan, options) << "\""
@@ -990,6 +999,304 @@ Result<std::string> render_sections(const binary::FileView& file, const Options&
             out << flags << "  " << section.name << "\n";
         }
     }
+    return Result<std::string>::ok(out.str());
+}
+
+namespace {
+std::string object_kind_name(binary::ObjectKind kind)
+{
+    switch (kind) {
+    case binary::ObjectKind::Relocatable:
+        return "relocatable";
+    case binary::ObjectKind::Executable:
+        return "executable";
+    case binary::ObjectKind::SharedLibrary:
+        return "shared library";
+    case binary::ObjectKind::StaticArchive:
+        return "static archive";
+    case binary::ObjectKind::Object:
+        return "object";
+    case binary::ObjectKind::Unknown:
+        break;
+    }
+    return "unknown";
+}
+} // namespace
+
+Result<std::string> render_headers(const binary::FileView& file, const Options& options)
+{
+    const std::optional<binary::Object> object = binary::primary_object(file);
+    std::ostringstream out;
+    if (options.mode == Mode::Json) {
+        out << "{\n";
+        out << "  \"format\": \"" << json_escape(std::string(binary::format_name(file.format))) << "\",\n";
+        if (object.has_value()) {
+            out << "  \"architecture\": \"" << binary::architecture_name(object->architecture) << "\",\n";
+            out << "  \"type\": \"" << object_kind_name(object->kind) << "\",\n";
+            out << "  \"endianness\": \"" << (object->endianness == binary::Endianness::Big ? "big" : "little") << "\",\n";
+            out << "  \"bits\": " << (object->address_width == binary::AddressWidth::Bits64 ? 64 : 32) << ",\n";
+            out << "  \"entry\": \"" << hex_address(object->entry) << "\"\n";
+        } else {
+            out << "  \"architecture\": null\n";
+        }
+        out << "}\n";
+        return Result<std::string>::ok(out.str());
+    }
+    out << colorize("Header", ansi_bold, options) << " of " << file.source_name << "\n";
+    out << "  format:        " << binary::format_name(file.format) << "\n";
+    if (object.has_value()) {
+        out << "  architecture:  " << binary::architecture_name(object->architecture) << "\n";
+        out << "  type:          " << object_kind_name(object->kind) << "\n";
+        out << "  endianness:    " << (object->endianness == binary::Endianness::Big ? "big" : "little") << "\n";
+        out << "  address width: " << (object->address_width == binary::AddressWidth::Bits64 ? "64-bit" : "32-bit") << "\n";
+        out << "  entry point:   " << hex_address(object->entry) << "\n";
+    }
+    return Result<std::string>::ok(out.str());
+}
+
+Result<std::string> render_segments(const binary::FileView& file, const Options& options)
+{
+    const std::optional<binary::Object> object = binary::primary_object(file);
+    const std::vector<binary::Segment> segments = object.has_value() ? object->segments : std::vector<binary::Segment>{};
+    std::ostringstream out;
+    if (options.mode == Mode::Json) {
+        out << "{\n  \"segments\": [\n";
+        for (std::size_t i = 0; i < segments.size(); ++i) {
+            const binary::Segment& segment = segments[i];
+            out << "    {\"name\":\"" << json_escape(segment.name) << "\",\"address\":\"" << hex_address(segment.address)
+                << "\",\"offset\":\"" << hex_address(segment.offset) << "\",\"size\":" << segment.size
+                << ",\"readable\":" << (segment.readable ? "true" : "false")
+                << ",\"writable\":" << (segment.writable ? "true" : "false")
+                << ",\"executable\":" << (segment.executable ? "true" : "false") << "}"
+                << (i + 1U < segments.size() ? "," : "") << "\n";
+        }
+        out << "  ]\n}\n";
+        return Result<std::string>::ok(out.str());
+    }
+    out << colorize("Segments", ansi_bold, options) << " in " << file.source_name << "\n";
+    for (const binary::Segment& segment : segments) {
+        const std::string perms = std::string(segment.readable ? "r" : "-") + (segment.writable ? "w" : "-") +
+                                  (segment.executable ? "x" : "-");
+        out << padded_hex_address(segment.address) << "  " << std::right << std::setw(10) << std::dec << segment.size
+            << "  " << perms << "  " << segment.name << "\n";
+    }
+    return Result<std::string>::ok(out.str());
+}
+
+Result<std::string> render_imports(const binary::FileView& file, const Options& options)
+{
+    const std::optional<binary::Object> object = binary::primary_object(file);
+    std::vector<binary::Symbol> imports;
+    std::vector<std::string> libraries;
+    if (object.has_value()) {
+        libraries = object->libraries;
+        for (const binary::Symbol& symbol : object->symbols) {
+            if (symbol.bind == binary::SymbolBind::Imported && !symbol.name.empty()) {
+                imports.push_back(symbol);
+            }
+        }
+    }
+    std::sort(imports.begin(), imports.end(), [](const binary::Symbol& a, const binary::Symbol& b) {
+        if (a.library != b.library) {
+            return a.library < b.library;
+        }
+        return a.name < b.name;
+    });
+
+    if (options.mode == Mode::Json) {
+        std::ostringstream out;
+        out << "{\n  \"libraries\": [";
+        for (std::size_t i = 0; i < libraries.size(); ++i) {
+            out << (i ? ", " : "") << "\"" << json_escape(libraries[i]) << "\"";
+        }
+        out << "],\n  \"imports\": [\n";
+        for (std::size_t i = 0; i < imports.size(); ++i) {
+            out << "    {\"name\":\"" << json_escape(imports[i].name) << "\",\"library\":\""
+                << json_escape(imports[i].library) << "\"}" << (i + 1U < imports.size() ? "," : "") << "\n";
+        }
+        out << "  ]\n}\n";
+        return Result<std::string>::ok(out.str());
+    }
+
+    std::ostringstream out;
+    out << colorize("Imports", ansi_bold, options) << " in " << file.source_name << "\n";
+    if (!libraries.empty()) {
+        out << "  libraries: ";
+        for (std::size_t i = 0; i < libraries.size(); ++i) {
+            out << (i ? ", " : "") << libraries[i];
+        }
+        out << "\n";
+    }
+    std::string current_library = "\x01"; // sentinel so the first group always prints
+    for (const binary::Symbol& symbol : imports) {
+        if (symbol.library != current_library) {
+            current_library = symbol.library;
+            out << "  " << colorize(current_library.empty() ? "(unbound)" : current_library, ansi_cyan, options) << ":\n";
+        }
+        out << "    " << symbol.name << "\n";
+    }
+    if (imports.empty()) {
+        out << "  (no imports)\n";
+    }
+    return Result<std::string>::ok(out.str());
+}
+
+Result<std::string> render_exports(const binary::FileView& file, const Options& options)
+{
+    const std::optional<binary::Object> object = binary::primary_object(file);
+    std::vector<binary::Symbol> exports;
+    if (object.has_value()) {
+        for (const binary::Symbol& symbol : object->symbols) {
+            if (symbol.bind == binary::SymbolBind::Exported) {
+                exports.push_back(symbol);
+            }
+        }
+    }
+    std::sort(exports.begin(), exports.end(),
+        [](const binary::Symbol& a, const binary::Symbol& b) { return a.name < b.name; });
+
+    if (options.mode == Mode::Json) {
+        std::ostringstream out;
+        out << "{\n  \"exports\": [\n";
+        for (std::size_t i = 0; i < exports.size(); ++i) {
+            out << "    {\"name\":\"" << json_escape(exports[i].name) << "\",\"address\":\""
+                << hex_address(exports[i].address) << "\"}" << (i + 1U < exports.size() ? "," : "") << "\n";
+        }
+        out << "  ]\n}\n";
+        return Result<std::string>::ok(out.str());
+    }
+
+    std::ostringstream out;
+    out << colorize("Exports", ansi_bold, options) << " in " << file.source_name << "\n";
+    for (const binary::Symbol& symbol : exports) {
+        out << padded_hex_address(symbol.address) << "  " << symbol.name << "\n";
+    }
+    if (exports.empty()) {
+        out << "  (no exports)\n";
+    }
+    return Result<std::string>::ok(out.str());
+}
+
+Result<std::string> render_hex(const std::vector<std::uint8_t>& bytes, std::uint64_t base, const Options& options)
+{
+    std::ostringstream out;
+    for (std::size_t row = 0; row < bytes.size(); row += 16) {
+        out << colorize(padded_hex_address(base + row), ansi_dim, options) << "  ";
+        std::string ascii;
+        for (std::size_t col = 0; col < 16; ++col) {
+            if (row + col < bytes.size()) {
+                const std::uint8_t byte = bytes[row + col];
+                out << std::hex << std::nouppercase << std::setfill('0') << std::setw(2)
+                    << static_cast<unsigned int>(byte) << ' ' << std::dec;
+                const bool printable = byte >= 0x20U && byte < 0x7fU;
+                const char glyph = printable ? static_cast<char>(byte) : '.';
+                if (printable && color_enabled(options)) {
+                    ascii += colorize(std::string(1, glyph), ansi_green, options);
+                } else {
+                    ascii += glyph;
+                }
+            } else {
+                out << "   ";
+            }
+            if (col == 7) {
+                out << ' ';
+            }
+        }
+        out << " |" << ascii << "|\n";
+    }
+    if (bytes.empty()) {
+        out << "(no bytes)\n";
+    }
+    return Result<std::string>::ok(out.str());
+}
+
+Result<std::string> render_strings(const std::vector<features::StringRef>& refs, const Options& options)
+{
+    std::ostringstream out;
+    if (options.mode == Mode::Json) {
+        out << "{\n  \"strings\": [\n";
+        for (std::size_t i = 0; i < refs.size(); ++i) {
+            const features::StringRef& ref = refs[i];
+            out << "    {\"address\":\"" << hex_address(ref.address) << "\",\"value\":\"" << json_escape(ref.value)
+                << "\",\"referenced\":" << (ref.referenced ? "true" : "false");
+            if (ref.referenced) {
+                out << ",\"from\":\"" << json_escape(ref.from_function) << "\",\"from_address\":\""
+                    << hex_address(ref.from_address) << "\"";
+            }
+            out << "}" << (i + 1U < refs.size() ? "," : "") << "\n";
+        }
+        out << "  ]\n}\n";
+        return Result<std::string>::ok(out.str());
+    }
+    for (const features::StringRef& ref : refs) {
+        out << colorize(padded_hex_address(ref.address), ansi_dim, options) << "  \""
+            << string_preview(ref.value) << "\"";
+        if (ref.referenced) {
+            out << "   " << colorize("used in: ", ansi_cyan, options) << ref.from_function << " @ "
+                << hex_address(ref.from_address);
+        } else {
+            out << "   " << colorize("(no xref found)", ansi_dim, options);
+        }
+        out << "\n";
+    }
+    return Result<std::string>::ok(out.str());
+}
+
+Result<std::string> render_find(
+    const std::vector<features::FindMatch>& matches, const std::string& pattern, const Options& options)
+{
+    std::ostringstream out;
+    if (options.mode == Mode::Json) {
+        out << "{\n  \"pattern\": \"" << json_escape(pattern) << "\",\n  \"matches\": [\n";
+        for (std::size_t i = 0; i < matches.size(); ++i) {
+            out << "    {\"name\":\"" << json_escape(matches[i].name) << "\",\"address\":\""
+                << hex_address(matches[i].address) << "\",\"source\":\"" << matches[i].source << "\"}"
+                << (i + 1U < matches.size() ? "," : "") << "\n";
+        }
+        out << "  ]\n}\n";
+        return Result<std::string>::ok(out.str());
+    }
+    out << colorize("Symbols matching", ansi_bold, options) << " \"" << pattern << "\" (" << matches.size() << ")\n";
+    for (const features::FindMatch& match : matches) {
+        out << colorize(padded_hex_address(match.address), ansi_dim, options) << "  "
+            << colorize("[" + match.source + "]", ansi_cyan, options) << "  " << match.name << "\n";
+    }
+    return Result<std::string>::ok(out.str());
+}
+
+Result<std::string> render_diff(const features::DiffResult& result, const Options& options)
+{
+    std::ostringstream out;
+    if (options.mode == Mode::Json) {
+        const auto array = [&](const std::vector<std::string>& items) {
+            std::string text = "[";
+            for (std::size_t i = 0; i < items.size(); ++i) {
+                text += (i ? ", " : "");
+                text += "\"" + json_escape(items[i]) + "\"";
+            }
+            text += "]";
+            return text;
+        };
+        out << "{\n";
+        out << "  \"added\": " << array(result.added) << ",\n";
+        out << "  \"removed\": " << array(result.removed) << ",\n";
+        out << "  \"changed\": " << array(result.changed) << ",\n";
+        out << "  \"unchanged\": " << result.unchanged << "\n";
+        out << "}\n";
+        return Result<std::string>::ok(out.str());
+    }
+    const auto group = [&](const char* label, const std::vector<std::string>& items, std::string_view color) {
+        out << "  " << colorize(label, color, options) << " (" << items.size() << ")";
+        out << "\n";
+        for (const std::string& item : items) {
+            out << "    " << item << "\n";
+        }
+    };
+    out << colorize("Function diff", ansi_bold, options) << "\n";
+    group("added", result.added, ansi_green);
+    group("removed", result.removed, ansi_red);
+    group("changed", result.changed, ansi_yellow);
+    out << "  unchanged: " << result.unchanged << "\n";
     return Result<std::string>::ok(out.str());
 }
 
