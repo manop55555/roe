@@ -35,16 +35,16 @@ namespace {
 void disassembles_compute(const char* arch, const char* fixture_path)
 {
     if (fixture_path == nullptr || fixture_path[0] == '\0') {
-        SUCCEED(std::string("no toolchain for ") + arch + "; fixture not built — skipped");
+        SUCCEED(std::string("no toolchain for ") + arch + "; fixture not built - skipped");
         return;
     }
     if (!std::filesystem::exists(fixture_path)) {
-        SUCCEED(std::string(arch) + " fixture path is set but the file is missing — skipped");
+        SUCCEED(std::string(arch) + " fixture path is set but the file is missing - skipped");
         return;
     }
     const std::filesystem::path roe = roe_executable();
     if (roe.empty()) {
-        SUCCEED("roe binary not found next to the test — skipped");
+        SUCCEED("roe binary not found next to the test - skipped");
         return;
     }
 

@@ -138,7 +138,7 @@ TEST_CASE("pager is spawned on a TTY and bypassed when piped or with --no-pager"
     const std::string pager_env = "PAGER=" + shell_quote(marker.string()) + " ";
     const std::string all = shell_quote(roe.string()) + " " + shell_quote(bin.string()) + " --all";
 
-    // Piped (stdout is the capture pipe, not a TTY): must NOT page — pipe safety.
+    // Piped (stdout is the capture pipe, not a TTY): must NOT page - pipe safety.
     const CommandResult piped = run_command(pager_env + all);
     CHECK(piped.exit_code == 0);
     CHECK(contains(piped.output, "0x"));

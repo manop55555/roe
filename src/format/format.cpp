@@ -99,7 +99,7 @@ bool looks_like_immediate(std::string_view token) noexcept
 std::string banner_text()
 {
     std::ostringstream out;
-    out << program_name << " v" << version_string << " \342\200\224 a disassembler fit for humans\n\n";
+    out << program_name << " v" << version_string << " - a disassembler fit for humans\n\n";
     out << "           (             )\n";
     out << "            `--(_   _)--'\n";
     out << "                 Y-Y\n";

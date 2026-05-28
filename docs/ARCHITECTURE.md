@@ -262,10 +262,10 @@ Responsibilities:
 
 Every parser that accepts untrusted bytes has a dedicated fuzzer:
 
-- `fuzz/elf_parser_fuzzer.cpp` — the ELF parser and its metadata accessors.
-- `fuzz/macho_parser_fuzzer.cpp` — the Mach-O parser.
-- `fuzz/pe_parser_fuzzer.cpp` — the PE/COFF parser.
-- `fuzz/binary_loader_fuzzer.cpp` — format detection and the loader path.
+- `fuzz/elf_parser_fuzzer.cpp` - the ELF parser and its metadata accessors.
+- `fuzz/macho_parser_fuzzer.cpp` - the Mach-O parser.
+- `fuzz/pe_parser_fuzzer.cpp` - the PE/COFF parser.
+- `fuzz/binary_loader_fuzzer.cpp` - format detection and the loader path.
 
 Fuzzers parse from owned byte vectors, exercise metadata accessors and adapter
 creation, and never shell out or depend on host toolchains.

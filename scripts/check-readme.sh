@@ -38,7 +38,7 @@ expect() { # <description> <text-that-must-appear> <command...>
     if grep -qF -- "${needle}" <<<"${out}"; then
         echo "ok: ${desc}"
     else
-        echo "FAIL: ${desc} — expected to find: ${needle}" >&2
+        echo "FAIL: ${desc} - expected to find: ${needle}" >&2
         echo "${out}" >&2
         fail=1
     fi

@@ -5,7 +5,7 @@ All notable changes to `roe` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com); this project uses
 [Semantic Versioning](https://semver.org).
 
-## [1.0.0] — 2026-05-28
+## [1.0.0] - 2026-05-28
 
 First release. `roe` is a command-line disassembler that aims to be readable by
 default, answering the LKML *"objdump output is just horrendous, not fit for
@@ -68,7 +68,7 @@ humans"* complaints (29 Oct 2025).
   CI workflows.
 - **PE/COFF function symbols.** The PE parser reads the COFF symbol table (and
   string table for long names), so `roe <pe> <func>`, the function list,
-  `--find`, `--grep`, `--xref`, and `--stats` work on PE binaries by name — not
+  `--find`, `--grep`, `--xref`, and `--stats` work on PE binaries by name - not
   just `--addr`. Function addresses are also filled in for exported symbols. PEs
   whose symbol table was stripped fall back to the export table and are reported
   as stripped. The symbol count is bounded (65 536 symbols) and fuzzed.

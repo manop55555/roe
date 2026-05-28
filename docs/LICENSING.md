@@ -16,7 +16,7 @@ proprietary and commercial products, while requiring that recipients receive a
 copy of the license, that modified files are marked, and that existing
 copyright, patent, trademark, and attribution notices are preserved. It was
 chosen because it is permissive enough to encourage adoption while providing an
-explicit patent grant and a clear `NOTICE` mechanism for attribution — useful
+explicit patent grant and a clear `NOTICE` mechanism for attribution - useful
 for a tool that links third-party libraries such as Capstone.
 
 ## Dependency licenses and compatibility
@@ -26,7 +26,7 @@ for a tool that links third-party libraries such as Capstone.
 | Capstone | Linked disassembly engine | BSD 3-Clause | `BSD-3-Clause` |
 | Catch2 | Test framework (build/test only) | Boost Software License 1.0 | `BSL-1.0` |
 
-### Capstone — BSD-3-Clause
+### Capstone - BSD-3-Clause
 
 Capstone (<https://www.capstone-engine.org>) is the disassembly engine `roe`
 links against. It is distributed under the 3-clause BSD license
@@ -39,7 +39,7 @@ subset of what Apache-2.0 already mandates, so BSD-3-Clause is **compatible
 with Apache-2.0**: Capstone can be linked into and redistributed alongside
 Apache-2.0 software without conflict, provided its notice is preserved.
 
-### Catch2 — Boost Software License 1.0
+### Catch2 - Boost Software License 1.0
 
 Catch2 (<https://github.com/catchorg/Catch2>) is used **only to build and run
 the test suite**. It is not linked into or shipped with the released `roe`
@@ -48,7 +48,7 @@ binary.
 The Boost Software License 1.0 is a permissive, OSI-approved license. It is
 **compatible with Apache-2.0**. Notably, BSL-1.0 does not require its license
 notice to be reproduced for distributions in the form of
-machine-executable object code — and because Catch2 is header-only and used
+machine-executable object code - and because Catch2 is header-only and used
 for testing only, no Catch2 code is present in distributed `roe` binaries at
 all.
 
@@ -82,8 +82,8 @@ identifying the project's own license:
 ```
 
 The `Apache-2.0` identifier is the canonical SPDX short form for the Apache
-License, Version 2.0. The dependency identifiers referenced in this document —
-`BSD-3-Clause` and `BSL-1.0` — are likewise the canonical SPDX short forms for
+License, Version 2.0. The dependency identifiers referenced in this document -
+`BSD-3-Clause` and `BSL-1.0` - are likewise the canonical SPDX short forms for
 those licenses. SPDX identifiers from the official list at
 <https://spdx.org/licenses/> are used throughout so that license scanners can
 determine the license of each file and component unambiguously.

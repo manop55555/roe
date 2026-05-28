@@ -23,11 +23,11 @@ before opening a pull request.
 We use [Conventional Commits](https://www.conventionalcommits.org). Each commit
 message starts with a type prefix describing the change:
 
-- `feat:` — a new feature.
-- `fix:` — a bug fix.
-- `docs:` — documentation-only changes.
-- `test:` — adding or updating tests.
-- `refactor:` — a code change that neither fixes a bug nor adds a feature.
+- `feat:` - a new feature.
+- `fix:` - a bug fix.
+- `docs:` - documentation-only changes.
+- `test:` - adding or updating tests.
+- `refactor:` - a code change that neither fixes a bug nor adds a feature.
 
 Example:
 

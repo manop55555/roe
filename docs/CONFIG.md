@@ -9,7 +9,7 @@ defaults.
 
 `roe` looks for the file in this order:
 
-1. `$ROE_CONFIG` — if set, this exact path is used.
+1. `$ROE_CONFIG` - if set, this exact path is used.
 2. Platform default:
    - **Linux/BSD:** `$XDG_CONFIG_HOME/roe/config.toml`, or
      `~/.config/roe/config.toml` if `XDG_CONFIG_HOME` is unset.
