@@ -30,3 +30,9 @@ fuzz/corpus/**
 !fuzz/corpus/elf_parser/elf64_le_relocatable_min.bin
 !fuzz/corpus/elf_parser/elf_magic_only.bin
 !fuzz/corpus/elf_parser/not_elf.txt
+
+# Generated binary fixtures (produced by scripts/gen-fixtures.sh; never checked in)
+tests/fixtures/*.elf64
+tests/fixtures/*.macho_*
+tests/fixtures/sample.pe_*
+tests/fixtures/shellcode.hex
