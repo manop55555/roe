@@ -77,6 +77,45 @@ TEST_CASE("the PE parser reads DLL exports", "[pe]")
     CHECK(has_mul);
 }
 
+TEST_CASE("the PE parser reads COFF function symbols by name", "[pe]")
+{
+    if (std::string(ROE_FIXTURE_PE).empty()) {
+        SUCCEED("mingw PE toolchain unavailable; skipping");
+        return;
+    }
+    const auto loaded = roe::binary::load_file(ROE_FIXTURE_PE);
+    REQUIRE(loaded.has_value());
+    const roe::binary::FileView& view = loaded.value()->view();
+
+    // The function list is populated from the COFF symbol table (was empty before).
+    const std::vector<roe::binary::Symbol> functions = roe::binary::function_symbols(view, 0);
+    CHECK_FALSE(functions.empty());
+
+    // 'main' is locatable by name with a real, section-backed address.
+    const std::optional<roe::binary::Symbol> main_symbol = roe::binary::find_symbol(view, 0, "main");
+    REQUIRE(main_symbol.has_value());
+    CHECK(main_symbol->type == roe::binary::SymbolType::Function);
+    CHECK(main_symbol->defined);
+    CHECK(main_symbol->address != 0);
+}
+
+TEST_CASE("PE exported functions gain addresses from the COFF table", "[pe]")
+{
+    if (std::string(ROE_FIXTURE_PE_DLL).empty()) {
+        SUCCEED("mingw PE toolchain unavailable; skipping");
+        return;
+    }
+    const auto loaded = roe::binary::load_file(ROE_FIXTURE_PE_DLL);
+    REQUIRE(loaded.has_value());
+    bool roe_add_has_address = false;
+    for (const roe::binary::Symbol& symbol : loaded.value()->view().objects.front().symbols) {
+        if (symbol.bind == roe::binary::SymbolBind::Exported && symbol.name == "roe_add") {
+            roe_add_has_address = symbol.address != 0; // filled from the COFF symbol, not left at 0
+        }
+    }
+    CHECK(roe_add_has_address);
+}
+
 TEST_CASE("the PE parser rejects malformed input", "[pe]")
 {
     CHECK_FALSE(roe::pe::parse_bytes("x", {'M', 'Z'}).has_value()); // too small
@@ -148,4 +187,7 @@ TEST_CASE("the PE parser bounds an implausible export-name count", "[pe][securit
         }
     }
     CHECK(exported == 0); // the count is rejected, not walked
+    // This crafted PE has no COFF symbol table; the parser must mark it stripped and
+    // fall back to the export table rather than reading a bogus symbol table.
+    CHECK(parsed.value().view.objects.front().stripped);
 }

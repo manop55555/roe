@@ -26,7 +26,7 @@ A missing or unreadable file is not an error; the built-in defaults apply.
 
 | Key          | Type    | Default  | Effect                                                      |
 | ------------ | ------- | -------- | ----------------------------------------------------------- |
-| `color`      | boolean | `true`   | Emit ANSI color on a TTY. `--no-color`/`NO_COLOR` also disable. |
+| `color`      | boolean | `true`   | Allow ANSI color; the default `--color=auto` then emits it only when stdout is a TTY. `--color=<auto\|always\|never>` / `--no-color` / `NO_COLOR` override. |
 | `pager`      | boolean | `true`   | Page long output through `$PAGER`. `--no-pager`/`NO_PAGER` also disable. |
 | `show_bytes` | boolean | `false`  | Show raw instruction bytes (like `--show-bytes`).           |
 | `source`     | boolean | `false`  | Interleave source lines when available (like `--source`).   |
@@ -53,4 +53,6 @@ For each setting, the value used is, in order of priority:
 4. the built-in default.
 
 Because `--no-color` and `--no-pager` only *disable*, setting `color = false` or
-`pager = false` in the config is the way to turn those off by default.
+`pager = false` in the config is the way to turn those off by default. To force
+color on even when piped (e.g. into `less -R`), use `--color=always`, which
+overrides `NO_COLOR` and the non-TTY default.

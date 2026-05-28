@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <unordered_map>
 #include <utility>
 
 namespace roe::pe {
@@ -236,6 +237,101 @@ void parse_exports(Reader& reader, const std::vector<SectionMap>& sections, std:
     }
 }
 
+// COFF symbol classification: a symbol whose complex (derived) type is FUNCTION.
+constexpr std::uint16_t coff_sym_dtype_function = 0x20U; // IMAGE_SYM_DTYPE_FUNCTION (2) << 4
+constexpr std::uint16_t coff_sym_class_external = 2U;    // IMAGE_SYM_CLASS_EXTERNAL
+
+// Read the COFF symbol table (PointerToSymbolTable / NumberOfSymbols in the COFF
+// header) into normalized function symbols, resolving long names through the
+// trailing string table. The table is optional: linkers commonly strip it
+// (IMAGE_FILE_LOCAL_SYMS_STRIPPED), in which case the object is marked stripped
+// and callers fall back to the export table. mingw emits section-relative symbol
+// Values, so address = section.address + value (verified against objdump: e.g.
+// main at .text+0x477). NumberOfSymbols is attacker-controlled, so it is clamped
+// before any offset arithmetic and every read stays bounds-checked.
+void parse_coff_symbols(Reader& reader, const std::vector<std::uint8_t>& bytes, std::size_t coff, binary::Object& object)
+{
+    const std::uint32_t sym_ptr = reader.u32(coff + 8);
+    const std::uint32_t raw_count = reader.u32(coff + 12);
+    if (!reader.ok() || sym_ptr == 0 || raw_count == 0) {
+        object.stripped = true; // no COFF symbol table (commonly stripped)
+        return;
+    }
+    const std::uint32_t count = std::min(raw_count, kMaxParsedSymbols);
+    const std::size_t symtab = static_cast<std::size_t>(sym_ptr);
+    const std::size_t symtab_end = symtab + (static_cast<std::size_t>(count) * 18U);
+    if (symtab_end > bytes.size()) {
+        object.stripped = true; // truncated or implausible symbol table
+        return;
+    }
+    const std::size_t strtab = symtab_end; // string table immediately follows the symbols
+
+    // Index existing exports by name so a function that is both exported and present
+    // in the COFF table fills the export's missing address instead of duplicating it.
+    std::unordered_map<std::string, std::size_t> export_index;
+    for (std::size_t k = 0; k < object.symbols.size(); ++k) {
+        if (object.symbols[k].bind == binary::SymbolBind::Exported) {
+            export_index.emplace(object.symbols[k].name, k);
+        }
+    }
+
+    for (std::uint32_t i = 0; i < count;) {
+        const std::size_t off = symtab + (static_cast<std::size_t>(i) * 18U);
+        const std::uint32_t name_inline = reader.u32(off);
+        const std::uint32_t value = reader.u32(off + 8);
+        const std::int16_t secnum = static_cast<std::int16_t>(reader.u16(off + 12));
+        const std::uint16_t type = reader.u16(off + 14);
+        const std::uint16_t class_aux = reader.u16(off + 16); // storage class | (aux count << 8)
+        if (!reader.ok()) {
+            break;
+        }
+        const std::uint8_t storage = static_cast<std::uint8_t>(class_aux & 0xFFU);
+        const std::uint8_t aux = static_cast<std::uint8_t>((class_aux >> 8) & 0xFFU);
+        i += 1U + static_cast<std::uint32_t>(aux); // step over auxiliary records
+
+        // Only defined functions anchored to a real section become function symbols.
+        if (type != coff_sym_dtype_function || secnum < 1) {
+            continue;
+        }
+        const std::size_t section_index = static_cast<std::size_t>(secnum) - 1U;
+        if (section_index >= object.sections.size()) {
+            continue;
+        }
+        std::string name;
+        if (name_inline == 0U) {
+            const std::uint32_t str_off = reader.u32(off + 4);
+            name = reader.c_string(strtab + static_cast<std::size_t>(str_off));
+        } else {
+            name = reader.fixed_string(off, 8);
+        }
+        if (name.empty()) {
+            continue;
+        }
+        const std::uint64_t address = object.sections[section_index].address + value;
+
+        if (const auto existing = export_index.find(name); existing != export_index.end()) {
+            binary::Symbol& exported = object.symbols[existing->second];
+            if (exported.address == 0U) {
+                exported.address = address;
+                exported.section_index = static_cast<std::uint32_t>(section_index);
+                exported.defined = true;
+            }
+            continue;
+        }
+
+        binary::Symbol symbol;
+        symbol.object_index = object.index;
+        symbol.name = name;
+        symbol.raw_name = name;
+        symbol.address = address;
+        symbol.section_index = static_cast<std::uint32_t>(section_index);
+        symbol.bind = storage == coff_sym_class_external ? binary::SymbolBind::Global : binary::SymbolBind::Local;
+        symbol.type = binary::SymbolType::Function;
+        symbol.defined = true;
+        object.symbols.push_back(std::move(symbol));
+    }
+}
+
 } // namespace
 
 Result<File> parse_bytes(std::string source_name, std::vector<std::uint8_t> bytes)
@@ -340,6 +436,7 @@ Result<File> parse_bytes(std::string source_name, std::vector<std::uint8_t> byte
 
     parse_imports(reader, maps, import_rva, pe32_plus, object);
     parse_exports(reader, maps, export_rva, object);
+    parse_coff_symbols(reader, bytes, coff, object);
 
     File file;
     file.view.source_name = std::move(source_name);

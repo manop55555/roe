@@ -20,10 +20,13 @@
 #include <memory>
 #include <optional>
 #include <ostream>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include <unistd.h>
 
 namespace roe::cli {
 namespace {
@@ -48,17 +51,17 @@ format::Options format_options(const Arguments& parsed)
     const features::Config config = features::load_config();
     format::Options options = format::default_options();
     options.mode = parsed.json ? format::Mode::Json : format::Mode::Text;
-    options.no_color_env = no_color_env_set();
-    options.color = config.color && !parsed.no_color && !options.no_color_env;
+    const bool no_color_env = no_color_env_set();
+    options.color = resolve_use_color(parsed, no_color_env, isatty(STDOUT_FILENO) != 0, config.color);
+    // The full color decision is folded into options.color above; clear no_color_env
+    // so format::color_enabled() does not re-apply NO_COLOR and defeat --color=always.
+    options.no_color_env = false;
     options.preserve_addresses = true;
     options.show_bytes = config.show_bytes || parsed.show_bytes || parsed.verbose >= 1;
     options.source = config.source || parsed.source;
     options.pager = config.pager && !parsed.no_pager;
     options.quiet = parsed.quiet;
     options.verbose = parsed.verbose;
-    if (parsed.quiet) {
-        options.color = false; // quiet output is meant for pipelines
-    }
     return options;
 }
 
@@ -203,6 +206,20 @@ std::optional<std::uint64_t> parse_number(std::string_view text) noexcept
 
 } // namespace
 
+bool resolve_use_color(const Arguments& args, bool no_color_env, bool stdout_is_tty, bool config_color) noexcept
+{
+    if (args.quiet) {
+        return false; // quiet output targets pipelines
+    }
+    if (args.color_always) {
+        return true; // explicit request wins over NO_COLOR and a non-TTY (e.g. | less -R)
+    }
+    if (args.no_color || no_color_env) {
+        return false; // --no-color / --color=never / NO_COLOR
+    }
+    return stdout_is_tty && config_color; // auto: color only when writing to a terminal
+}
+
 Result<Arguments> parse_args(int argc, char** argv)
 {
     if (argc < 0 || (argc > 0 && argv == nullptr)) {
@@ -228,6 +245,7 @@ Result<Arguments> parse_args(int argc, char** argv)
 
         if (argument == "--help" || argument == "-h") {
             parsed.action = Action::ShowHelp;
+            parsed.explicit_help = true;
             if (index + 1 < argc && argv[index + 1] != nullptr && !is_flag(argv[index + 1])) {
                 parsed.help_topic = std::string(argv[index + 1]);
             }
@@ -248,6 +266,29 @@ Result<Arguments> parse_args(int argc, char** argv)
         }
         if (argument == "--no-color") {
             parsed.no_color = true;
+        } else if (argument == "--color" || argument.rfind("--color=", 0) == 0) {
+            std::string mode;
+            if (argument.rfind("--color=", 0) == 0) {
+                mode = std::string(argument.substr(std::string_view("--color=").size()));
+            } else {
+                Result<std::string> value = value_for(index, "--color");
+                if (!value) {
+                    return Result<Arguments>::err(std::move(value).error());
+                }
+                mode = std::move(value).value();
+            }
+            if (mode == "auto") {
+                parsed.color_always = false;
+                parsed.no_color = false;
+            } else if (mode == "always") {
+                parsed.color_always = true;
+                parsed.no_color = false;
+            } else if (mode == "never") {
+                parsed.no_color = true;
+                parsed.color_always = false;
+            } else {
+                return Result<Arguments>::err(usage_error("--color must be auto, always, or never"));
+            }
         } else if (argument == "--no-pager") {
             parsed.no_pager = true;
         } else if (argument == "--json") {
@@ -796,6 +837,25 @@ bool looks_like_hex_text(const std::vector<std::uint8_t>& bytes)
     return any;
 }
 
+// True when the input is all printable text (no binary bytes) with at least one
+// non-space character. Combined with !looks_like_hex_text, this flags a botched
+// hex string (e.g. "zz zz") so the user is told it is being read as raw bytes
+// instead of silently disassembling the literal characters.
+bool looks_like_failed_hex(const std::vector<std::uint8_t>& bytes)
+{
+    bool any_graphic = false;
+    for (const std::uint8_t b : bytes) {
+        if (b == ' ' || b == '\t' || b == '\n' || b == '\r' || b == '\v' || b == '\f') {
+            continue;
+        }
+        if (b < 0x20 || b > 0x7e) {
+            return false; // a non-printable byte means genuine binary input, not a hex typo
+        }
+        any_graphic = true;
+    }
+    return any_graphic;
+}
+
 std::vector<std::uint8_t> parse_hex_bytes(const std::vector<std::uint8_t>& bytes)
 {
     std::string digits;
@@ -833,10 +893,29 @@ int run_raw_bytes(const Arguments& args, const format::Options& opts, std::ostre
         return exit_disasm_error;
     }
     const std::vector<std::uint8_t> data = read_stdin_bytes();
-    std::vector<std::uint8_t> code = (args.hex_input || looks_like_hex_text(data)) ? parse_hex_bytes(data) : data;
-    if (code.empty()) {
-        write_error(err, Error{ErrorCode::Usage, "no bytes received on stdin", 0, false}, opts);
-        return exit_usage;
+    std::vector<std::uint8_t> code;
+    if (args.hex_input) {
+        code = parse_hex_bytes(data);
+        if (code.empty()) {
+            // Distinguish an empty pipe from bytes that simply contained no hex digits.
+            const char* message = data.empty() ? "no bytes received on stdin"
+                                               : "--hex-input: input contained no valid hex digits";
+            write_error(err, Error{ErrorCode::Usage, message, 0, false}, opts);
+            return exit_usage;
+        }
+    } else if (looks_like_hex_text(data)) {
+        code = parse_hex_bytes(data);
+    } else {
+        // Auto-detection fell back to raw bytes. If the input looks like a botched hex
+        // string rather than binary, say so instead of silently disassembling the text.
+        if (looks_like_failed_hex(data)) {
+            write_line(err, "note: input is not valid hex; interpreting as raw bytes (use --hex-input to force hex)");
+        }
+        code = data;
+        if (code.empty()) {
+            write_error(err, Error{ErrorCode::Usage, "no bytes received on stdin", 0, false}, opts);
+            return exit_usage;
+        }
     }
     const std::uint64_t base = args.base.value_or(0);
     disasm::CodeBuffer buffer{base, code.begin(), code.end()};
@@ -911,6 +990,16 @@ int run_disassemble_addr(
     return write_rendered(render_annotated(annotated, args, opts), out, err, opts);
 }
 
+// Tell the user, on stderr, when a --hex/--bytes request was shortened to fit the
+// containing section so a short dump is never silently mistaken for the full request.
+void write_hex_clamp_note(std::ostream& err, std::uint64_t shown, const std::string& section_name, std::uint64_t end_address)
+{
+    std::ostringstream note;
+    note << "note: clamped to " << shown << " bytes (section " << section_name << " ends at 0x" << std::hex
+         << end_address << ")";
+    write_line(err, note.str());
+}
+
 int run_hex(
     const binary::BinaryFile& file,
     const binary::Object& object,
@@ -934,6 +1023,12 @@ int run_hex(
         }
         bytes = std::move(sb).value().bytes;
         base = section->address;
+        // --bytes also limits a named-section dump; note when it asked for more than the section holds.
+        if (args.bytes_count.has_value() && args.bytes_count.value() < bytes.size()) {
+            bytes.resize(static_cast<std::size_t>(args.bytes_count.value()));
+        } else if (args.bytes_count.has_value() && args.bytes_count.value() > bytes.size()) {
+            write_hex_clamp_note(err, bytes.size(), section->name, base + bytes.size());
+        }
     } else if (args.addr.has_value() || args.range_start.has_value()) {
         const std::uint64_t start = args.addr.value_or(args.range_start.value_or(0));
         const std::optional<binary::Section> section = section_containing(object, start);
@@ -949,12 +1044,19 @@ int run_hex(
         const std::vector<std::uint8_t>& data = sb.value().bytes;
         const std::uint64_t off = start - section->address;
         std::uint64_t length = args.bytes_count.value_or(64U);
+        // A count is "requested" (and worth a clamp note) only when the user gave --bytes or --range.
+        const bool explicit_length = args.bytes_count.has_value() || args.range_start.has_value();
         if (args.range_start.has_value() && args.range_end.has_value()) {
             length = (args.range_end.value() - args.range_start.value()) + 1U;
         }
         if (off < data.size()) {
             const std::uint64_t available = data.size() - off;
-            length = std::min<std::uint64_t>(length, available);
+            if (length > available) {
+                if (explicit_length) {
+                    write_hex_clamp_note(err, available, section->name, section->address + data.size());
+                }
+                length = available;
+            }
             bytes.assign(data.begin() + static_cast<std::ptrdiff_t>(off),
                 data.begin() + static_cast<std::ptrdiff_t>(off + length));
         }
@@ -1143,7 +1245,16 @@ int execute(const Arguments& args, std::ostream& out, std::ostream& err)
         if (args.help_topic.has_value()) {
             return write_rendered(format::render_help_topic(args.help_topic.value()), out, err, opts);
         }
-        return write_rendered(format::render_help(), out, err, opts);
+        if (args.explicit_help) {
+            return write_rendered(format::render_help(), out, err, opts);
+        }
+        // No actionable arguments: print help to stderr and exit with a usage error,
+        // the standard convention for a tool that requires a file argument.
+        const Result<std::string> help = format::render_help();
+        if (help) {
+            write_line(err, help.value());
+        }
+        return exit_usage;
     }
     if (args.action == Action::ShowVersion) {
         return write_rendered(format::render_version(), out, err, opts);

@@ -2,7 +2,8 @@
 // Copyright 2026 The roe Authors
 
 // Fuzz the PE/COFF parser directly from untrusted bytes, exercising the import
-// and export table walks (RVA translation) and the BinaryFile adapter.
+// and export table walks (RVA translation), the COFF symbol/string-table walk,
+// and the BinaryFile adapter.
 
 #include "roe/pe.hpp"
 
@@ -30,11 +31,17 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
         return 0;
     }
     const roe::binary::FileView& view = loaded.value()->view();
+    std::size_t sink = 0;
     for (const roe::binary::Object& object : view.objects) {
         for (const roe::binary::Section& section : object.sections) {
             const auto contents = loaded.value()->section_bytes(section);
             static_cast<void>(contents);
         }
+        // Touch every parsed symbol (COFF symbol-table walk + string-table names).
+        for (const roe::binary::Symbol& symbol : object.symbols) {
+            sink += symbol.name.size() + static_cast<std::size_t>(symbol.address);
+        }
     }
+    static_cast<void>(sink);
     return 0;
 }

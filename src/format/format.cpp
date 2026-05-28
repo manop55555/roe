@@ -387,7 +387,7 @@ Result<std::string> render_help()
     out << "  --imports              imported symbols grouped by library\n";
     out << "  --exports              exported symbols\n";
     out << "  --hex [section]        hex + ASCII dump of a section, --addr, or --range\n";
-    out << "  --bytes <n>            byte count for --hex with --addr\n";
+    out << "  --bytes <n>            byte count for --hex (clamped to the section; notes on stderr)\n";
     out << "  --strings              extract strings with their referencing instruction\n";
     out << "  --min-len <n>          minimum string length for --strings (default 4)\n";
     out << "  --find <pattern>       fuzzy symbol search across all symbol sources\n\n";
@@ -402,7 +402,8 @@ Result<std::string> render_help()
 
     out << "Output:\n";
     out << "  --json                 emit machine-readable JSON\n";
-    out << "  --no-color             disable ANSI color for pipes and logs\n";
+    out << "  --color <when>         colorize: auto (TTY only, default), always (even when piped), never\n";
+    out << "  --no-color             alias for --color=never (NO_COLOR also disables; --color=always overrides)\n";
     out << "  --show-bytes           show raw instruction bytes (off by default)\n";
     out << "  --source               interleave source lines from debug info\n";
     out << "  --no-pager             do not page long output through $PAGER\n";
@@ -866,7 +867,7 @@ Result<std::string> render_completions(const std::string& shell)
         "--section --all -D --addr --range --raw-bytes --hex-input --base --arch "
         "--headers --sections --segments --imports --exports --hex --bytes --strings --min-len --find "
         "--grep --calls --contains --xref --stats --diff "
-        "--json --no-color --show-bytes --source --no-pager --quiet -q --verbose -v --watch --completions "
+        "--json --color --no-color --show-bytes --source --no-pager --quiet -q --verbose -v --watch --completions "
         "--help -h --version -V";
     std::ostringstream out;
     if (shell == "bash") {
@@ -923,7 +924,8 @@ Result<std::string> render_completions(const std::string& shell)
         out << "complete -c roe -l xref -d 'Call sites of a symbol'\n";
         out << "complete -c roe -l stats -d 'Per-function statistics'\n";
         out << "complete -c roe -l json -d 'Machine-readable JSON'\n";
-        out << "complete -c roe -l no-color -d 'Disable color'\n";
+        out << "complete -c roe -l color -d 'Colorize: auto, always, or never'\n";
+        out << "complete -c roe -l no-color -d 'Disable color (alias for --color=never)'\n";
         out << "complete -c roe -l show-bytes -d 'Show raw instruction bytes'\n";
         out << "complete -c roe -l source -d 'Interleave source lines'\n";
         out << "complete -c roe -l no-pager -d 'Disable the pager'\n";
@@ -938,7 +940,7 @@ Result<std::string> render_completions(const std::string& shell)
         out << "    $opts = @('" << "--section','--all','--addr','--range','--raw-bytes','--base','--arch',"
             << "'--headers','--sections','--segments','--imports','--exports','--hex','--bytes','--strings',"
             << "'--min-len','--find','--grep','--calls','--contains','--xref','--stats','--diff',"
-            << "'--json','--no-color','--show-bytes','--source','--no-pager','--quiet','--verbose',"
+            << "'--json','--color','--no-color','--show-bytes','--source','--no-pager','--quiet','--verbose',"
             << "'--watch','--completions','--help','--version')\n";
         out << "    $opts | Where-Object { $_ -like \"$wordToComplete*\" } | ForEach-Object {\n";
         out << "        [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterName', $_)\n";

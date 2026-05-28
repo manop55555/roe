@@ -133,11 +133,13 @@ Base address to assign to the bytes read with
 Defaults to 0.
 .TP
 .BI \-\-bytes " n"
-Number of bytes to dump when
-.B \-\-hex
-is combined with
+Number of bytes to dump with
+.BR \-\-hex .
+The dump is clamped to the end of the containing section; when
+.I n
+exceeds the bytes available, the actual count is reported in a note on standard
+error. Defaults to 64 with
 .BR \-\-addr .
-Defaults to 64.
 .TP
 .BI \-\-calls " symbol"
 List only the functions that call or branch to
@@ -198,7 +200,8 @@ When dumping at an address, the length is governed by
 Force the bytes read with
 .B \-\-raw\-bytes
 to be interpreted as hexadecimal text. Without this flag the input format is
-auto\-detected.
+auto\-detected; text that is not valid hex is read as raw bytes after a note on
+standard error. With this flag, input containing no valid hex digits is an error.
 .TP
 .B \-\-imports
 List the symbols the file imports, grouped by the library that provides them.
@@ -213,11 +216,26 @@ Minimum length of a run of printable characters that
 .B \-\-strings
 reports. Defaults to 4.
 .TP
+.BI \-\-color " when"
+Control ANSI color output.
+.I when
+is
+.B auto
+(the default: color only when standard output is a terminal),
+.B always
+(color even when piped, e.g. for
+.BR "less \-R" ),
+or
+.BR never .
+.TP
 .B \-\-no\-color
-Disable ANSI color in the output, as for pipes and log files. Color is also
-disabled when the
+Alias for
+.BR \-\-color=never .
+Color is also disabled when the
 .B NO_COLOR
-environment variable is set.
+environment variable is set;
+.B \-\-color=always
+overrides both.
 .TP
 .B \-\-no\-pager
 Do not page long output through the pager. Paging is also disabled when the
@@ -419,7 +437,8 @@ echo \(aq55 48 89 e5 c3\(aq | roe \-\-raw\-bytes \-\-arch x86_64
 Success.
 .TP
 .B 1
-Usage error, such as an unknown flag or a missing argument.
+Usage error, such as an unknown flag, a missing argument, or running with no
+arguments (help is then printed to standard error).
 .TP
 .B 2
 File or format error, such as a missing file or an unrecognized container.
@@ -430,7 +449,9 @@ Disassembly error, such as a failure in the disassembler or symbol resolver.
 .TP
 .B NO_COLOR
 When set to any value, disable ANSI color, as with
-.BR \-\-no\-color .
+.BR \-\-color=never .
+This is overridden by
+.BR \-\-color=always .
 .TP
 .B NO_PAGER
 When set to any value, disable the pager, as with

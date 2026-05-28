@@ -162,8 +162,9 @@ References to printf (1)
   [`docs/JSON_SCHEMA.md`](docs/JSON_SCHEMA.md).
 - **Watch mode** (`--watch`), a pager (`$PAGER`), a config file
   ([`docs/CONFIG.md`](docs/CONFIG.md)), and `--quiet`/`--verbose` for pipelines.
-- **Sane defaults**: addresses preserved, raw bytes off, color on a TTY, paged
-  when long. `NO_COLOR`, `NO_PAGER`, `--no-color`, `--no-pager` all respected.
+- **Sane defaults**: addresses preserved, raw bytes off, color only on a TTY
+  (`--color=auto|always|never`), paged when long. `NO_COLOR`, `NO_PAGER`,
+  `--color`, `--no-color`, `--no-pager` all respected.
 
 ## Inspect and compare, across formats
 
@@ -204,7 +205,10 @@ references. The others are supported and unit-tested against known encodings;
 ARM/Thumb mode is selected with `--arch thumb` when needed.
 
 roe **parses ELF, Mach-O (x86-64 + ARM64, thin and fat), and PE/COFF
-(x86/x86-64/ARM64, `.exe` and `.dll`)**, detected by magic bytes. Static
+(x86/x86-64/ARM64, `.exe` and `.dll`)**, detected by magic bytes. Function
+symbols come from ELF/Mach-O symbol tables and the PE/COFF symbol table (falling
+back to the export table for stripped PEs), so `roe <file> <function>`, `--find`,
+`--grep`, `--xref`, and `--stats` work by name across all three formats. Static
 archives are detected but not parsed — extract members and inspect them
 individually. The polymorphic `BinaryFile` interface (see
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)) keeps disasm, resolver, and

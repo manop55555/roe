@@ -70,6 +70,8 @@ struct Arguments {
     std::optional<std::uint64_t> base;
     std::optional<std::uint64_t> min_len;
     bool no_color{false};
+    bool color_always{false};
+    bool explicit_help{false};
     bool no_pager{false};
     bool json{false};
     bool show_bytes{false};
@@ -99,6 +101,15 @@ inline constexpr int exit_disasm_error = 3;
  * @brief Parse command line arguments without doing IO.
  */
 Result<Arguments> parse_args(int argc, char** argv);
+
+/**
+ * @brief Decide whether to colorize output. Pure (no IO) so it is unit-testable.
+ *
+ * Precedence: --quiet disables; --color=always forces on (even when piped or with
+ * NO_COLOR set, e.g. for `| less -R`); --no-color / --color=never / NO_COLOR
+ * disable; otherwise auto = colorize only when stdout is a TTY and config allows.
+ */
+bool resolve_use_color(const Arguments& args, bool no_color_env, bool stdout_is_tty, bool config_color) noexcept;
 
 /**
  * @brief Execute a parsed command and write output streams.

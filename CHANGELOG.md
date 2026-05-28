@@ -5,6 +5,40 @@ All notable changes to `roe` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com); this project uses
 [Semantic Versioning](https://semver.org).
 
+## [1.0.1] — 2026-05-28
+
+Five fixes from the v1.0.0 full-feature test sweep (no crashes were found; these
+are documented-behavior and consistency gaps).
+
+### Added
+
+- **PE/COFF function symbols.** The PE parser now reads the COFF symbol table
+  (and string table for long names), so `roe <pe> <func>`, the function list,
+  `--find`, `--grep`, `--xref`, and `--stats` work on PE binaries by name — not
+  just `--addr`. Function addresses are also filled in for exported symbols. PEs
+  whose symbol table was stripped fall back to the export table and are reported
+  as stripped. The new count is bounded (65 536 symbols) and fuzzed.
+- **`--color=<auto|always|never>`.** `--no-color` is now an alias for
+  `--color=never`; `--color=always` keeps color when piped (e.g. `| less -R`).
+
+### Changed
+
+- **Color is auto-gated to a TTY by default.** Output is colorized only when
+  stdout is a terminal, matching the documented "color on a TTY" default; piping
+  no longer requires an explicit `--no-color`. `NO_COLOR` still forces off;
+  `--color=always` overrides it.
+- **Running `roe` with no arguments** now prints help to stderr and exits 1 (a
+  usage error), consistent with other usage errors. `--help`/`-h` still print to
+  stdout and exit 0.
+- **`--hex --bytes <n>`** now also limits a named-section dump, and prints a
+  `note:` to stderr when the count is clamped to the section/range boundary
+  instead of silently returning fewer bytes.
+- **`--raw-bytes`** prints a `note:` to stderr when text input is not valid hex
+  and is read as raw bytes (`--hex-input` forces hex); `--hex-input` now reports
+  `input contained no valid hex digits` distinctly from an empty stdin.
+
+[1.0.1]: https://github.com/USER/roe/releases/tag/v1.0.1
+
 ## [1.0.0] — 2026-05-28
 
 First release. `roe` is a command-line disassembler that aims to be readable by
