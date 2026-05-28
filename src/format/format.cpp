@@ -352,7 +352,7 @@ Result<std::string> render_version()
     out << "  build commit:  " << build_commit << "\n";
     out << "  build date:    " << build_date << "\n";
     out << "  capstone:      " << capstone_version << "\n";
-    out << "  formats:       ELF (Mach-O, PE/COFF, and archive are recognized; this build disassembles ELF)\n";
+    out << "  formats:       ELF, Mach-O, PE/COFF (parsed); static archive (detected)\n";
     out << "  architectures: x86, x86-64, arm, thumb, aarch64, riscv32, riscv64, "
            "mips, mipsel, mips64, mips64el, ppc, ppc64, ppc64le\n";
     return Result<std::string>::ok(out.str());
@@ -373,21 +373,41 @@ Result<std::string> render_help()
     out << "  <symbol>               function name (mangled or demangled) to disassemble\n";
     out << "  --section <name>       disassemble a named section, e.g. .text\n";
     out << "  --all, -D              disassemble every executable section\n";
-    out << "  --arch <name>          override the architecture (e.g. thumb, riscv64)\n\n";
+    out << "  --addr <hex>           disassemble from an address (stripped-safe)\n";
+    out << "  --range <a>-<b>        disassemble an inclusive address range\n";
+    out << "  --raw-bytes            disassemble bytes from stdin (needs --arch)\n";
+    out << "  --hex-input            treat stdin as a hex string (with --raw-bytes)\n";
+    out << "  --base <hex>           base address for --raw-bytes (default 0)\n";
+    out << "  --arch <name>          override/select the architecture (e.g. thumb, riscv64)\n\n";
 
-    out << "Filtering:\n";
+    out << "Inspect:\n";
+    out << "  --headers              file header: format, arch, type, entry point\n";
+    out << "  --sections             sections with size, permissions, offset\n";
+    out << "  --segments             program headers / load commands / data directories\n";
+    out << "  --imports              imported symbols grouped by library\n";
+    out << "  --exports              exported symbols\n";
+    out << "  --hex [section]        hex + ASCII dump of a section, --addr, or --range\n";
+    out << "  --bytes <n>            byte count for --hex with --addr\n";
+    out << "  --strings              extract strings with their referencing instruction\n";
+    out << "  --min-len <n>          minimum string length for --strings (default 4)\n";
+    out << "  --find <pattern>       fuzzy symbol search across all symbol sources\n\n";
+
+    out << "Filtering & comparison:\n";
     out << "  --grep <regex>         list functions whose name matches a regex\n";
     out << "  --calls <symbol>       list functions that call or branch to a symbol\n";
     out << "  --contains <string>    list functions whose body references a string\n";
     out << "  --xref <symbol>        show every call site of a symbol\n";
-    out << "  --stats                per-function size, basic blocks, branches, depth\n\n";
+    out << "  --stats                per-function size, basic blocks, branches, depth\n";
+    out << "  --diff <other>         function-level diff against another binary\n\n";
 
     out << "Output:\n";
     out << "  --json                 emit machine-readable JSON\n";
     out << "  --no-color             disable ANSI color for pipes and logs\n";
     out << "  --show-bytes           show raw instruction bytes (off by default)\n";
     out << "  --source               interleave source lines from debug info\n";
-    out << "  --no-pager             do not page long output through $PAGER\n\n";
+    out << "  --no-pager             do not page long output through $PAGER\n";
+    out << "  --quiet, -q            bare output for pipelines (no headers/decoration)\n";
+    out << "  --verbose, -v          extra context; -v -v adds debug to stderr\n\n";
 
     out << "Workflow:\n";
     out << "  --watch                re-run automatically when the file changes\n";
@@ -396,11 +416,12 @@ Result<std::string> render_help()
     out << "  --version, -V          show version, build info, arches, and formats\n\n";
 
     out << "Examples:\n";
-    out << "  roe vmlinux.o                          list every function\n";
     out << "  roe vmlinux.o handle_mm_fault          disassemble one function, resolved\n";
-    out << "  roe a.out main --json | jq .           machine-readable disassembly\n";
-    out << "  roe libfoo.so --grep '::'              find C++ methods\n";
-    out << "  roe a.out --xref malloc                find every call site of malloc\n\n";
+    out << "  roe a.out --addr 0x4012a0              disassemble a stripped function\n";
+    out << "  roe a.out --imports                    imports grouped by library\n";
+    out << "  roe a.out --strings                    strings with their xref\n";
+    out << "  roe new.bin --diff old.bin             function-level diff\n";
+    out << "  echo '55 48 89 e5 c3' | roe --raw-bytes --arch x86_64\n\n";
 
     out << "See 'man roe' or https://github.com/USER/roe for the full manual.\n";
     return Result<std::string>::ok(out.str());
@@ -790,10 +811,10 @@ Result<std::string> render_help_topic(const std::string& topic)
         out << "  roe <file> --stats             per-function statistics\n";
     } else if (topic == "formats") {
         out << "Supported container formats (detected by magic bytes, not extension):\n";
-        out << "  ELF              fully supported (Linux, BSD): ELF32/64, little/big endian\n";
-        out << "  Mach-O           recognized; reported as unsupported in this build\n";
-        out << "  PE/COFF          recognized; reported as unsupported in this build\n";
-        out << "  static archive   recognized; reported as unsupported in this build\n";
+        out << "  ELF              parsed: ELF32/64, little/big endian, executables, .so, .o\n";
+        out << "  Mach-O           parsed: x86-64 and ARM64, thin and fat/universal\n";
+        out << "  PE/COFF          parsed: x86, x86-64, ARM64; .exe and .dll\n";
+        out << "  static archive   recognized; extract members and inspect them individually\n";
     } else if (topic == "arches") {
         out << "Disassembly architectures (Capstone-backed):\n";
         out << "  x86, x86-64                fully verified\n";
@@ -812,6 +833,12 @@ Result<std::string> render_help_topic(const std::string& topic)
         out << "  roe a.out --calls printf               functions that call printf\n";
         out << "  roe a.out --xref malloc                every call site of malloc\n";
         out << "  roe a.out --stats                      per-function statistics\n";
+        out << "  roe a.out --addr 0x4012a0              disassemble a stripped function\n";
+        out << "  roe a.out --imports                    imports grouped by library\n";
+        out << "  roe a.out --hex .rodata                hex + ASCII dump of a section\n";
+        out << "  roe a.out --strings                    strings with their xref\n";
+        out << "  roe new.bin --diff old.bin             function-level diff\n";
+        out << "  echo '55 48 89 e5 c3' | roe --raw-bytes --arch x86_64\n";
     } else if (topic == "config") {
         out << "Configuration file (CLI flags always override):\n";
         out << "  Linux:    $XDG_CONFIG_HOME/roe/config.toml  (default ~/.config/roe/config.toml)\n";
@@ -836,8 +863,10 @@ Result<std::string> render_help_topic(const std::string& topic)
 Result<std::string> render_completions(const std::string& shell)
 {
     static constexpr std::string_view flags =
-        "--section --all -D --arch --grep --calls --contains --xref --stats "
-        "--json --no-color --show-bytes --source --no-pager --watch --completions "
+        "--section --all -D --addr --range --raw-bytes --hex-input --base --arch "
+        "--headers --sections --segments --imports --exports --hex --bytes --strings --min-len --find "
+        "--grep --calls --contains --xref --stats --diff "
+        "--json --no-color --show-bytes --source --no-pager --quiet -q --verbose -v --watch --completions "
         "--help -h --version -V";
     std::ostringstream out;
     if (shell == "bash") {
@@ -869,7 +898,25 @@ Result<std::string> render_completions(const std::string& shell)
         out << "# roe fish completion.\n";
         out << "complete -c roe -l section -d 'Disassemble a named section'\n";
         out << "complete -c roe -l all -s D -d 'Disassemble all executable sections'\n";
+        out << "complete -c roe -l addr -d 'Disassemble from an address'\n";
+        out << "complete -c roe -l range -d 'Disassemble an address range'\n";
+        out << "complete -c roe -l raw-bytes -d 'Disassemble bytes from stdin'\n";
+        out << "complete -c roe -l hex-input -d 'Treat stdin as hex'\n";
+        out << "complete -c roe -l base -d 'Base address for raw bytes'\n";
         out << "complete -c roe -l arch -d 'Override architecture'\n";
+        out << "complete -c roe -l headers -d 'Show the file header'\n";
+        out << "complete -c roe -l sections -d 'List sections'\n";
+        out << "complete -c roe -l segments -d 'List segments'\n";
+        out << "complete -c roe -l imports -d 'List imported symbols'\n";
+        out << "complete -c roe -l exports -d 'List exported symbols'\n";
+        out << "complete -c roe -l hex -d 'Hex + ASCII dump'\n";
+        out << "complete -c roe -l bytes -d 'Byte count for --hex'\n";
+        out << "complete -c roe -l strings -d 'Extract strings with xref'\n";
+        out << "complete -c roe -l min-len -d 'Minimum string length'\n";
+        out << "complete -c roe -l find -d 'Fuzzy symbol search'\n";
+        out << "complete -c roe -l diff -d 'Function-level diff'\n";
+        out << "complete -c roe -l quiet -s q -d 'Bare output for pipelines'\n";
+        out << "complete -c roe -l verbose -s v -d 'Extra context'\n";
         out << "complete -c roe -l grep -d 'Filter functions by name regex'\n";
         out << "complete -c roe -l calls -d 'Functions that call a symbol'\n";
         out << "complete -c roe -l contains -d 'Functions referencing a string'\n";
@@ -888,9 +935,11 @@ Result<std::string> render_completions(const std::string& shell)
         out << "# roe PowerShell completion. Add to your profile.\n";
         out << "Register-ArgumentCompleter -Native -CommandName roe -ScriptBlock {\n";
         out << "    param($wordToComplete, $commandAst, $cursorPosition)\n";
-        out << "    $opts = @('" << "--section','--all','--arch','--grep','--calls','--contains',"
-            << "'--xref','--stats','--json','--no-color','--show-bytes','--source',"
-            << "'--no-pager','--watch','--completions','--help','--version')\n";
+        out << "    $opts = @('" << "--section','--all','--addr','--range','--raw-bytes','--base','--arch',"
+            << "'--headers','--sections','--segments','--imports','--exports','--hex','--bytes','--strings',"
+            << "'--min-len','--find','--grep','--calls','--contains','--xref','--stats','--diff',"
+            << "'--json','--no-color','--show-bytes','--source','--no-pager','--quiet','--verbose',"
+            << "'--watch','--completions','--help','--version')\n";
         out << "    $opts | Where-Object { $_ -like \"$wordToComplete*\" } | ForEach-Object {\n";
         out << "        [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterName', $_)\n";
         out << "    }\n";
