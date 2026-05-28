@@ -267,6 +267,48 @@ if(ROE_BUILD_TESTS)
     else()
         list(APPEND ROE_FIXTURE_DEFINES ROE_FIXTURE_AARCH64="")
     endif()
+
+    # x86-32 ELF object fixture: native compiler with -m32, only when the 32-bit
+    # headers (gcc-multilib) are present. Probe with the real source and flags.
+    execute_process(
+        COMMAND "${CMAKE_CXX_COMPILER}" -m32 -x c -c -o /dev/null "${ROE_FIXTURE_C_SRC}"
+        RESULT_VARIABLE ROE_M32_RESULT
+        OUTPUT_QUIET ERROR_QUIET)
+    if(ROE_M32_RESULT EQUAL 0)
+        set(ROE_FIXTURE_X86_32 "${ROE_FIXTURE_BIN_DIR}/sample.x86_32.o")
+        add_custom_command(OUTPUT "${ROE_FIXTURE_X86_32}"
+            COMMAND "${CMAKE_CXX_COMPILER}" -m32 -x c -g -O1 -c -o "${ROE_FIXTURE_X86_32}" "${ROE_FIXTURE_C_SRC}"
+            DEPENDS "${ROE_FIXTURE_C_SRC}" VERBATIM)
+        list(APPEND ROE_FIXTURE_OUTPUTS "${ROE_FIXTURE_X86_32}")
+        list(APPEND ROE_FIXTURE_DEFINES ROE_FIXTURE_X86_32="${ROE_FIXTURE_X86_32}")
+    else()
+        list(APPEND ROE_FIXTURE_DEFINES ROE_FIXTURE_X86_32="")
+    endif()
+
+    # MIPS / MIPSel ELF object fixtures (cross-gcc), if the toolchains are present.
+    find_program(ROE_MIPS_CC NAMES mips-linux-gnu-gcc)
+    if(ROE_MIPS_CC)
+        set(ROE_FIXTURE_MIPS "${ROE_FIXTURE_BIN_DIR}/sample.mips.o")
+        add_custom_command(OUTPUT "${ROE_FIXTURE_MIPS}"
+            COMMAND "${ROE_MIPS_CC}" -x c -g -O1 -c -o "${ROE_FIXTURE_MIPS}" "${ROE_FIXTURE_C_SRC}"
+            DEPENDS "${ROE_FIXTURE_C_SRC}" VERBATIM)
+        list(APPEND ROE_FIXTURE_OUTPUTS "${ROE_FIXTURE_MIPS}")
+        list(APPEND ROE_FIXTURE_DEFINES ROE_FIXTURE_MIPS="${ROE_FIXTURE_MIPS}")
+    else()
+        list(APPEND ROE_FIXTURE_DEFINES ROE_FIXTURE_MIPS="")
+    endif()
+    find_program(ROE_MIPSEL_CC NAMES mipsel-linux-gnu-gcc)
+    if(ROE_MIPSEL_CC)
+        set(ROE_FIXTURE_MIPSEL "${ROE_FIXTURE_BIN_DIR}/sample.mipsel.o")
+        add_custom_command(OUTPUT "${ROE_FIXTURE_MIPSEL}"
+            COMMAND "${ROE_MIPSEL_CC}" -x c -g -O1 -c -o "${ROE_FIXTURE_MIPSEL}" "${ROE_FIXTURE_C_SRC}"
+            DEPENDS "${ROE_FIXTURE_C_SRC}" VERBATIM)
+        list(APPEND ROE_FIXTURE_OUTPUTS "${ROE_FIXTURE_MIPSEL}")
+        list(APPEND ROE_FIXTURE_DEFINES ROE_FIXTURE_MIPSEL="${ROE_FIXTURE_MIPSEL}")
+    else()
+        list(APPEND ROE_FIXTURE_DEFINES ROE_FIXTURE_MIPSEL="")
+    endif()
+
     add_custom_target(roe_fixtures ALL DEPENDS ${ROE_FIXTURE_OUTPUTS})
 
     file(
