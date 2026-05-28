@@ -207,7 +207,7 @@ void test_json_escaping_and_references()
 void test_banner_and_help()
 {
     const std::string banner = roe::format::render_banner().value();
-    require_contains(banner, "roe v1.0.1", "banner should include program version");
+    require_contains(banner, "roe v1.0.0", "banner should include program version");
     require_contains(banner, "a disassembler fit for humans", "banner should include required tagline");
     require_contains(banner, "Y-Y", "banner should include deer ASCII art");
     require_contains(banner, "resolve relocations", "banner should include feature line");

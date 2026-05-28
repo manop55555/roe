@@ -44,6 +44,6 @@ TEST_CASE("test_core_version_contract", "[core]")
     REQUIRE(roe::program_name == std::string("roe"));
     REQUIRE(roe::version_major == 1);
     REQUIRE(roe::version_minor == 0);
-    REQUIRE(roe::version_patch == 1);
-    REQUIRE(roe::version_string == std::string("1.0.1"));
+    REQUIRE(roe::version_patch == 0);
+    REQUIRE(roe::version_string == std::string("1.0.0"));
 }
