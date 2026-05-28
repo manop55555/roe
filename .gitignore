@@ -38,3 +38,5 @@ tests/fixtures/sample.pe_*
 tests/fixtures/shellcode.hex
 !fuzz/corpus/macho/regression-extract-strings-overflow
 !fuzz/corpus/pe/regression-export-name-budget
+.antigravitycli/
+TEST_REPORT.md
