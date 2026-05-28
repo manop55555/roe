@@ -85,3 +85,67 @@ TEST_CASE("the PE parser rejects malformed input", "[pe]")
     no_signature[1] = 'Z';
     CHECK_FALSE(roe::pe::parse_bytes("x", std::move(no_signature)).has_value()); // no PE signature
 }
+
+TEST_CASE("the PE parser bounds an implausible export-name count", "[pe][security]")
+{
+    // A well-formed PE32+ DLL that claims 1,000,000 export names. The parser must
+    // reject the implausible count (kMaxParsedSymbols == 65536) up front instead
+    // of walking it: a hostile file could otherwise force pathologically slow
+    // parsing. Found by libFuzzer (pe_parser_fuzzer ran >70 min on such mutants).
+    std::vector<std::uint8_t> buf(0x400, 0);
+    auto put16 = [&buf](std::size_t off, std::uint16_t v) {
+        buf[off] = static_cast<std::uint8_t>(v & 0xFFU);
+        buf[off + 1] = static_cast<std::uint8_t>((v >> 8) & 0xFFU);
+    };
+    auto put32 = [&buf](std::size_t off, std::uint32_t v) {
+        buf[off] = static_cast<std::uint8_t>(v & 0xFFU);
+        buf[off + 1] = static_cast<std::uint8_t>((v >> 8) & 0xFFU);
+        buf[off + 2] = static_cast<std::uint8_t>((v >> 16) & 0xFFU);
+        buf[off + 3] = static_cast<std::uint8_t>((v >> 24) & 0xFFU);
+    };
+
+    buf[0] = 'M';
+    buf[1] = 'Z';
+    put32(0x3C, 0x40); // e_lfanew -> PE header at 0x40
+    buf[0x40] = 'P';
+    buf[0x41] = 'E'; // "PE\0\0" signature
+
+    // COFF header at 0x44.
+    put16(0x44, 0x8664); // machine: x86-64
+    put16(0x46, 1); // one section
+    put16(0x54, 0xF0); // size of optional header (PE32+, 16 data dirs)
+    put16(0x56, 0x2000); // characteristics: DLL
+
+    // Optional header (PE32+) at 0x58.
+    put16(0x58, 0x20B); // magic: PE32+
+    put32(0x58 + 108, 16); // NumberOfRvaAndSizes
+
+    // Data directory 0 (export) at datadir_off = 0x58 + 112 = 0xC8.
+    put32(0xC8, 0x1000); // export directory RVA
+    put32(0xCC, 0x100); // export directory size
+
+    // Section table at 0x58 + 0xF0 = 0x148; RVA 0x1000 -> file offset 0x200.
+    const char* const name = ".rdata";
+    for (std::size_t i = 0; name[i] != '\0'; ++i) {
+        buf[0x148 + i] = static_cast<std::uint8_t>(name[i]);
+    }
+    put32(0x148 + 8, 0x1000); // virtual size
+    put32(0x148 + 12, 0x1000); // virtual address
+    put32(0x148 + 16, 0x200); // size of raw data
+    put32(0x148 + 20, 0x200); // pointer to raw data
+    put32(0x148 + 36, 0x40000040U); // initialized data | readable
+
+    // Export directory at file offset 0x200.
+    put32(0x200 + 24, 1000000U); // NumberOfNames: implausible
+    put32(0x200 + 32, 0x1100); // AddressOfNames RVA (valid, within the section)
+
+    const auto parsed = roe::pe::parse_bytes("crafted.dll", std::move(buf));
+    REQUIRE(parsed.has_value()); // a well-formed PE, just with a hostile count
+    std::size_t exported = 0;
+    for (const roe::binary::Symbol& symbol : parsed.value().view.objects.front().symbols) {
+        if (symbol.bind == roe::binary::SymbolBind::Exported) {
+            ++exported;
+        }
+    }
+    CHECK(exported == 0); // the count is rejected, not walked
+}

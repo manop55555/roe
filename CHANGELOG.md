@@ -64,6 +64,14 @@ humans"* complaints (29 Oct 2025).
 - **Distribution**: `install.sh`, a multi-stage Docker image, `cmake --install`,
   and Debian/RPM/Arch/Alpine/Nix/Homebrew/Scoop manifests.
 - **Quality**: Catch2 test suite (≥80% line coverage), ASan/UBSan-clean,
-  libFuzzer harnesses (ELF parser and full pipeline), and CI workflows.
+  libFuzzer harnesses (ELF, Mach-O, and PE parsers plus the full loader), and
+  CI workflows.
+
+### Security
+
+- **Hardened the PE parser against resource exhaustion.** Import-thunk iteration
+  and the export-name count are now bounded (65 536 symbols per object), so a
+  malformed PE cannot force unbounded parsing work. Surfaced by the libFuzzer PE
+  harness and locked in place by a regression seed and a unit test.
 
 [1.0.0]: https://github.com/USER/roe/releases/tag/v1.0.0

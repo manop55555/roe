@@ -4,8 +4,8 @@
 #
 #   ./scripts/fuzz.sh [elf|binary|macho|pe|archive] [runs]
 #
-# roe focuses on ELF; macho/pe/archive are recognized but not parsed in this
-# build, so those targets report that honestly instead of pretending to fuzz.
+# roe parses ELF, Mach-O, and PE/COFF; static archives are detected but not
+# parsed, so the archive target reports that honestly instead of pretending.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

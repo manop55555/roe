@@ -136,6 +136,11 @@ bool rva_to_offset(const std::vector<SectionMap>& sections, std::uint32_t rva, s
     return false;
 }
 
+// A malformed PE can claim enormous import/export tables; cap total work so a
+// hostile file cannot force unbounded parsing (resource exhaustion). 65536 is
+// roughly 10x the import/export count of the largest real-world binaries.
+constexpr std::uint32_t kMaxParsedSymbols = 65536;
+
 void parse_imports(Reader& reader, const std::vector<SectionMap>& sections, std::uint32_t import_rva,
     bool pe32_plus, binary::Object& object)
 {
@@ -143,6 +148,7 @@ void parse_imports(Reader& reader, const std::vector<SectionMap>& sections, std:
     if (import_rva == 0 || !rva_to_offset(sections, import_rva, dir_off)) {
         return;
     }
+    std::uint32_t budget = 0;
     for (std::uint32_t entry = 0; entry < 4096; ++entry) {
         const std::size_t base = dir_off + (static_cast<std::size_t>(entry) * 20U);
         const std::uint32_t ilt_rva = reader.u32(base);
@@ -165,6 +171,9 @@ void parse_imports(Reader& reader, const std::vector<SectionMap>& sections, std:
         }
         const std::size_t thunk_size = pe32_plus ? 8U : 4U;
         for (std::uint32_t t = 0; t < 65536; ++t) {
+            if (budget++ >= kMaxParsedSymbols) {
+                return; // bound total work across all descriptors
+            }
             const std::size_t to = thunk_off + (static_cast<std::size_t>(t) * thunk_size);
             const std::uint64_t thunk = pe32_plus ? reader.u64(to) : reader.u32(to);
             if (!reader.ok() || thunk == 0) {
@@ -204,7 +213,7 @@ void parse_exports(Reader& reader, const std::vector<SectionMap>& sections, std:
     const std::uint32_t num_names = reader.u32(dir_off + 24);
     const std::uint32_t names_rva = reader.u32(dir_off + 32);
     std::size_t names_off = 0;
-    if (num_names == 0 || num_names > 1000000U || !rva_to_offset(sections, names_rva, names_off)) {
+    if (num_names == 0 || num_names > kMaxParsedSymbols || !rva_to_offset(sections, names_rva, names_off)) {
         return;
     }
     for (std::uint32_t i = 0; i < num_names; ++i) {
