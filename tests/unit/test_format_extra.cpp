@@ -27,7 +27,8 @@ TEST_CASE("banner, version, and help render the expected sections", "[format]")
     CHECK(has(render_version().value(), "capstone:"));
     const std::string help = render_help().value();
     CHECK(has(help, "Input:"));
-    CHECK(has(help, "Filtering:"));
+    CHECK(has(help, "Inspect:"));
+    CHECK(has(help, "Filtering"));
     CHECK(has(help, "Examples:"));
     CHECK(has(help, "man roe"));
 }
