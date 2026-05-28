@@ -113,7 +113,14 @@ More:
 ```sh
 roe demo main --json | jq .       # machine-readable output
 roe demo main --source            # interleave source lines (needs -g)
-roe demo main --show-bytes        # include raw instruction bytes
+roe demo --addr 0x1160            # disassemble by address (stripped-safe)
+roe demo --headers                # format, arch, entry point
+roe demo --imports                # imports grouped by library
+roe demo --hex .rodata            # hex + ASCII dump
+roe demo --strings                # strings with their xref
+roe demo --find printf            # fuzzy symbol search
+roe new --diff old                # function-level diff
+echo '55 48 89 e5 c3' | roe --raw-bytes --arch x86_64
 roe libfoo.so --grep '::'         # C++ methods, demangled
 roe demo --calls printf           # functions that call printf
 roe demo --xref printf            # every call site of printf
@@ -143,14 +150,45 @@ References to printf (1)
 - **String-reference annotation** — `lea rdi, [rip + 0xe51]  ; "hello: %d\n"`.
 - **C++ (Itanium) and Rust (legacy + v0) demangling.**
 - **Source interleaving** (`--source`) from DWARF line info.
-- **Search/filter** — `--grep`, `--calls`, `--contains`; cross-references
-  (`--xref`); per-function statistics (`--stats`).
+- **Disassemble by address** — `--addr 0x4012a0` / `--range a-b` work on
+  stripped binaries; `--raw-bytes` decodes hex or binary from stdin.
+- **Inspect any format** — `--headers`, `--sections`, `--segments`,
+  `--imports` (grouped by library), `--exports`, and a `--hex` dump.
+- **Search/compare** — `--grep`, `--calls`, `--contains`, `--xref`, `--stats`,
+  `--strings` (with xref), `--find` (fuzzy), and `--diff` between two binaries.
+- **C++ (Itanium) and Rust (legacy + v0) demangling.**
+- **Source interleaving** (`--source`) from DWARF line info.
 - **JSON output** for every command (`--json`), documented in
   [`docs/JSON_SCHEMA.md`](docs/JSON_SCHEMA.md).
-- **Watch mode** (`--watch`), a pager (`$PAGER`), and a config file
-  ([`docs/CONFIG.md`](docs/CONFIG.md)).
+- **Watch mode** (`--watch`), a pager (`$PAGER`), a config file
+  ([`docs/CONFIG.md`](docs/CONFIG.md)), and `--quiet`/`--verbose` for pipelines.
 - **Sane defaults**: addresses preserved, raw bytes off, color on a TTY, paged
   when long. `NO_COLOR`, `NO_PAGER`, `--no-color`, `--no-pager` all respected.
+
+## Inspect and compare, across formats
+
+`--imports` groups by library and works on every format — here a Windows PE:
+
+```
+$ roe sample.pe_x64 --imports
+Imports in sample.pe_x64
+  libraries: KERNEL32.dll, msvcrt.dll
+  KERNEL32.dll:
+    DeleteCriticalSection
+    EnterCriticalSection
+    GetLastError
+    ...
+```
+
+`--diff` shows what changed between two builds of a function:
+
+```
+$ roe v2.elf64 changed_fn --diff v1.elf64
+diff of changed_fn (v1.elf64 -> v2.elf64)
+- lea eax, [rdi + rdi]
++ lea eax, [rdi + rdi*2]
+  ret
+```
 
 ## Architecture and format support
 
@@ -165,11 +203,12 @@ cross-compiled fixtures and every feature, including ARM64 ADRP+ADD string
 references. The others are supported and unit-tested against known encodings;
 ARM/Thumb mode is selected with `--arch thumb` when needed.
 
-This release **parses ELF**. Mach-O, PE/COFF, and static archives are detected
-by magic bytes and reported clearly rather than mis-parsed. The polymorphic
-`BinaryFile` interface (see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)) is in
-place so additional backends slot in without touching disasm, resolver, or
-output code.
+roe **parses ELF, Mach-O (x86-64 + ARM64, thin and fat), and PE/COFF
+(x86/x86-64/ARM64, `.exe` and `.dll`)**, detected by magic bytes. Static
+archives are detected but not parsed — extract members and inspect them
+individually. The polymorphic `BinaryFile` interface (see
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)) keeps disasm, resolver, and
+output code format-agnostic.
 
 ## Install
 
