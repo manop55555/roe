@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and publish (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
 
 permissions:
   contents: write
@@ -22,7 +28,7 @@ jobs:
           - artifact: linux-aarch64
             runner: ubuntu-24.04-arm
             package: tar.gz
-          - artifact: linux-armv7
+          - artifact: linux-arm
             runner: ubuntu-24.04
             package: tar.gz
             cc: arm-linux-gnueabihf-gcc
@@ -34,10 +40,10 @@ jobs:
             cc: riscv64-linux-gnu-gcc
             cxx: riscv64-linux-gnu-g++
             apt: g++-riscv64-linux-gnu
-          - artifact: macos-x86_64
+          - artifact: darwin-x86_64
             runner: macos-13
             package: tar.gz
-          - artifact: macos-aarch64
+          - artifact: darwin-aarch64
             runner: macos-14
             package: tar.gz
           - artifact: windows-x86_64
@@ -51,7 +57,23 @@ jobs:
             package: tar.gz
             freebsd: true
     steps:
+      # install.sh fetches assets named roe-<version>-<os>-<arch>.<ext> with NO 'v'
+      # prefix, os in {linux,darwin}, arch in {x86_64,aarch64,arm,riscv64}. Keep the
+      # artifact labels and this version string in sync with install.sh.
+      - name: Resolve ref and version
+        id: ver
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            ref="${{ inputs.tag }}"
+          else
+            ref="${{ github.ref_name }}"
+          fi
+          echo "ref=${ref}" >> "$GITHUB_OUTPUT"
+          echo "version=${ref#v}" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ver.outputs.ref }}
       - name: Install Linux dependencies
         if: runner.os == 'Linux' && matrix.freebsd != true
         run: |
@@ -92,34 +114,56 @@ jobs:
         shell: bash
         run: |
           cd dist
-          tar -czf "../roe-${{ github.ref_name }}-${{ matrix.artifact }}.tar.gz" roe
+          tar -czf "../roe-${{ steps.ver.outputs.version }}-${{ matrix.artifact }}.tar.gz" roe
       - name: Package zip
         if: matrix.package == 'zip'
         shell: pwsh
-        run: Compress-Archive -Path dist/roe/* -DestinationPath "roe-${{ github.ref_name }}-${{ matrix.artifact }}.zip"
+        run: Compress-Archive -Path dist/roe/* -DestinationPath "roe-${{ steps.ver.outputs.version }}-${{ matrix.artifact }}.zip"
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: roe-${{ github.ref_name }}-${{ matrix.artifact }}
+          name: roe-${{ steps.ver.outputs.version }}-${{ matrix.artifact }}
           path: |
-            roe-${{ github.ref_name }}-${{ matrix.artifact }}.tar.gz
-            roe-${{ github.ref_name }}-${{ matrix.artifact }}.zip
+            roe-${{ steps.ver.outputs.version }}-${{ matrix.artifact }}.tar.gz
+            roe-${{ steps.ver.outputs.version }}-${{ matrix.artifact }}.zip
           if-no-files-found: error
 
   publish:
     needs: build
+    # Run even if some matrix legs failed, so the release still gets whatever built.
+    if: ${{ always() }}
     runs-on: ubuntu-24.04
     steps:
+      - name: Resolve ref
+        id: ver
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "ref=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
       - name: Checksums
+        shell: bash
         run: |
           cd artifacts
-          sha256sum * > SHA256SUMS
+          shopt -s nullglob
+          assets=( *.tar.gz *.zip )
+          # install.sh downloads "<asset>.sha256" and runs `sha256sum -c` on it, so the
+          # checksum file must contain the BARE asset filename.
+          for f in "${assets[@]}"; do
+            sha256sum "$f" > "${f}.sha256"
+          done
+          if [ ${#assets[@]} -gt 0 ]; then
+            sha256sum "${assets[@]}" > SHA256SUMS
+          fi
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.ver.outputs.ref }}
           files: artifacts/*
           generate_release_notes: true
