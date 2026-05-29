@@ -31,8 +31,7 @@ detect_os() {
     os="$(uname -s)"
     case "${os}" in
         Linux) echo "linux" ;;
-        Darwin) echo "darwin" ;;
-        *) die "unsupported operating system: ${os}" ;;
+        *) die "unsupported operating system: ${os} (prebuilt binaries are Linux-only; build from source — see the README)" ;;
     esac
 }
 
@@ -42,9 +41,7 @@ detect_arch() {
     case "${arch}" in
         x86_64 | amd64) echo "x86_64" ;;
         aarch64 | arm64) echo "aarch64" ;;
-        armv7l | armv7 | armhf | arm) echo "arm" ;;
-        riscv64) echo "riscv64" ;;
-        *) die "unsupported architecture: ${arch}" ;;
+        *) die "unsupported architecture: ${arch} (prebuilt binaries cover x86_64 and aarch64; build from source — see the README)" ;;
     esac
 }
 

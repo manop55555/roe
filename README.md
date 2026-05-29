@@ -97,10 +97,11 @@ After install, the tool is on your PATH as `roe`:
 roe --version
 ```
 
-Pre-built binaries, a Docker image (`ghcr.io/manop55555/roe`), and the
-Debian/RPM/Arch/Alpine/Nix/Homebrew/Scoop manifests in [packaging/](packaging/)
-are published with each GitHub release. The one-line installer downloads the
-latest release binary and verifies its SHA-256:
+Prebuilt **Linux** binaries (`x86_64` and `aarch64`) and a Docker image
+(`ghcr.io/manop55555/roe`) are published with each GitHub release; packaging
+manifests for other distributions live in [packaging/](packaging/). The
+one-line installer downloads the latest Linux release binary and verifies its
+SHA-256 (on other platforms, build from source as shown above):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/manop55555/roe/main/install.sh | sh

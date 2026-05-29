@@ -14,6 +14,10 @@ on:
 permissions:
   contents: write
 
+# Prebuilt binaries ship for Linux x86_64 and aarch64. install.sh advertises
+# exactly these targets; keep the two in sync. Other platforms build from source
+# (see the README) — the distro Capstone is 4.0.2 and lacks capstone/riscv.h, and
+# cross/macOS/Windows Capstone-5 provisioning is out of scope for the prebuilt set.
 jobs:
   build:
     name: ${{ matrix.artifact }}
@@ -24,42 +28,10 @@ jobs:
         include:
           - artifact: linux-x86_64
             runner: ubuntu-24.04
-            package: tar.gz
           - artifact: linux-aarch64
             runner: ubuntu-24.04-arm
-            package: tar.gz
-          - artifact: linux-arm
-            runner: ubuntu-24.04
-            package: tar.gz
-            cc: arm-linux-gnueabihf-gcc
-            cxx: arm-linux-gnueabihf-g++
-            apt: g++-arm-linux-gnueabihf
-          - artifact: linux-riscv64
-            runner: ubuntu-24.04
-            package: tar.gz
-            cc: riscv64-linux-gnu-gcc
-            cxx: riscv64-linux-gnu-g++
-            apt: g++-riscv64-linux-gnu
-          - artifact: darwin-x86_64
-            runner: macos-13
-            package: tar.gz
-          - artifact: darwin-aarch64
-            runner: macos-14
-            package: tar.gz
-          - artifact: windows-x86_64
-            runner: windows-2022
-            package: zip
-          - artifact: windows-aarch64
-            runner: windows-11-arm
-            package: zip
-          - artifact: freebsd-x86_64
-            runner: ubuntu-24.04
-            package: tar.gz
-            freebsd: true
     steps:
-      # install.sh fetches assets named roe-<version>-<os>-<arch>.<ext> with NO 'v'
-      # prefix, os in {linux,darwin}, arch in {x86_64,aarch64,arm,riscv64}. Keep the
-      # artifact labels and this version string in sync with install.sh.
+      # install.sh fetches roe-<version>-<os>-<arch>.tar.gz with NO leading 'v'.
       - name: Resolve ref and version
         id: ver
         shell: bash
@@ -74,63 +46,42 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ steps.ver.outputs.ref }}
-      - name: Install Linux dependencies
-        if: runner.os == 'Linux' && matrix.freebsd != true
+      # roe requires Capstone >= 5 (it uses the RISC-V decoder headers). The distro
+      # package is too old / lacks capstone/riscv.h, so build Capstone 5 from source.
+      - name: Install Capstone 5 from source
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build g++ pkg-config libcapstone-dev ${{ matrix.apt }}
-      - name: Install macOS dependencies
-        if: runner.os == 'macOS'
-        run: brew install capstone ninja
+          sudo apt-get install -y cmake ninja-build g++ pkg-config git
+          git clone --depth 1 --branch 5.0.3 https://github.com/capstone-engine/capstone.git /tmp/capstone
+          cmake -S /tmp/capstone -B /tmp/capstone/build -DCMAKE_BUILD_TYPE=Release \
+            -DCAPSTONE_BUILD_TESTS=OFF -DCAPSTONE_BUILD_CSTOOL=OFF
+          cmake --build /tmp/capstone/build -j
+          sudo cmake --install /tmp/capstone/build
+          sudo ldconfig
+      - name: Show toolchain
+        run: pkg-config --modversion capstone
       - name: Configure
-        if: matrix.freebsd != true
-        shell: bash
-        run: |
-          if [ -n "${{ matrix.cc }}" ]; then
-            export CC="${{ matrix.cc }}"
-            export CXX="${{ matrix.cxx }}"
-          fi
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DROE_BUILD_TESTS=OFF
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DROE_BUILD_TESTS=OFF
       - name: Build
-        if: matrix.freebsd != true
         run: cmake --build build
       - name: Install image
-        if: matrix.freebsd != true
         shell: bash
-        run: |
-          cmake --install build --prefix "$PWD/dist/roe" --strip
-      - name: Build FreeBSD artifact
-        if: matrix.freebsd == true
-        uses: vmactions/freebsd-vm@v1
-        with:
-          usesh: true
-          prepare: pkg install -y cmake ninja capstone pkgconf
-          run: |
-            cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DROE_BUILD_TESTS=OFF
-            cmake --build build
-            cmake --install build --prefix "$PWD/dist/roe" --strip
+        run: cmake --install build --prefix "$PWD/dist/roe" --strip
       - name: Package tarball
-        if: matrix.package == 'tar.gz'
         shell: bash
         run: |
           cd dist
           tar -czf "../roe-${{ steps.ver.outputs.version }}-${{ matrix.artifact }}.tar.gz" roe
-      - name: Package zip
-        if: matrix.package == 'zip'
-        shell: pwsh
-        run: Compress-Archive -Path dist/roe/* -DestinationPath "roe-${{ steps.ver.outputs.version }}-${{ matrix.artifact }}.zip"
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: roe-${{ steps.ver.outputs.version }}-${{ matrix.artifact }}
-          path: |
-            roe-${{ steps.ver.outputs.version }}-${{ matrix.artifact }}.tar.gz
-            roe-${{ steps.ver.outputs.version }}-${{ matrix.artifact }}.zip
+          path: roe-${{ steps.ver.outputs.version }}-${{ matrix.artifact }}.tar.gz
           if-no-files-found: error
 
   publish:
     needs: build
-    # Run even if some matrix legs failed, so the release still gets whatever built.
+    # Publish whatever built, even if one leg failed.
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     steps:
@@ -152,8 +103,8 @@ jobs:
         run: |
           cd artifacts
           shopt -s nullglob
-          assets=( *.tar.gz *.zip )
-          # install.sh downloads "<asset>.sha256" and runs `sha256sum -c` on it, so the
+          assets=( *.tar.gz )
+          # install.sh downloads "<asset>.sha256" and runs `sha256sum -c`, so the
           # checksum file must contain the BARE asset filename.
           for f in "${assets[@]}"; do
             sha256sum "$f" > "${f}.sha256"
