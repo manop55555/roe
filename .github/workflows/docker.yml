@@ -39,6 +39,10 @@ jobs:
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
+          # GHCR publish is gated OFF (the multi-arch build still runs and is verified).
+          # The ghcr.io/manop55555/roe package is bound to a prior repo and denies write_package.
+          # To re-enable publishing: (1) delete or relink that package so it binds to this repo,
+          # then (2) set repo variable PUBLISH_GHCR=true (Settings > Secrets and variables > Actions).
+          push: ${{ github.event_name != 'pull_request' && vars.PUBLISH_GHCR == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
