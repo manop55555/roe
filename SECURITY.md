@@ -28,13 +28,13 @@ cmake --build build-fuzz -j
 ./build-fuzz/elf_parser_fuzzer fuzz/corpus/elf_parser -runs=100000
 ```
 
-The v0.1.0 release sign-off target is at least 1,000,000 libFuzzer iterations with ASan and UBSan enabled and zero crashes, leaks, or sanitizer findings:
+The v1.0.0 release sign-off target is at least 1,000,000 libFuzzer iterations with ASan and UBSan enabled and zero crashes, leaks, or sanitizer findings:
 
 ```sh
 ./build-fuzz/elf_parser_fuzzer fuzz/corpus/elf_parser -runs=1000000
 ```
 
-For v0.1.0, the ELF parser fuzzer completed 1,000,000 iterations with ASan and UBSan enabled and zero crashes or sanitizer findings.
+For v1.0.0, the ELF parser fuzzer completed 1,000,000 iterations with ASan and UBSan enabled and zero crashes or sanitizer findings.
 
 ## Sanitizers
 

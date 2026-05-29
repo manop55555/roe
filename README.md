@@ -112,6 +112,51 @@ Shell completions for bash, zsh, fish, and PowerShell:
 roe --completions bash > /etc/bash_completion.d/roe   # or: zsh | fish | powershell
 ```
 
+## Uninstall
+
+Remove `roe` with the method that matches how you installed it.
+
+**One-line installer or a hand-copied binary.** The installer drops the binary in
+`/usr/local/bin` when that is writable, otherwise in `~/.local/bin`, so remove it from
+wherever it landed (check both if unsure — a stale copy in one can shadow the other on
+your `PATH`):
+
+```bash
+sudo rm -f /usr/local/bin/roe   # system-wide install
+rm -f ~/.local/bin/roe          # per-user install
+```
+
+**Built and installed with CMake.** Remove exactly what the install recorded:
+
+```bash
+sudo xargs rm -v < build/install_manifest.txt
+```
+
+If the manifest is gone, delete the files by hand:
+
+```bash
+sudo rm -f  /usr/local/bin/roe /usr/local/share/man/man1/roe.1
+sudo rm -rf /usr/local/share/doc/roe /usr/local/share/roe /usr/local/include/roe
+```
+
+Also delete any shell completion you installed, e.g. `sudo rm -f /etc/bash_completion.d/roe`.
+
+**Package manager or Docker.** Use its own command:
+
+```bash
+brew uninstall roe                   # Homebrew
+sudo apt remove roe                  # Debian/Ubuntu
+sudo dnf remove roe                  # Fedora/RHEL
+sudo pacman -R roe                   # Arch
+sudo apk del roe                     # Alpine
+nix-env -e roe                       # Nix
+scoop uninstall roe                  # Windows (Scoop)
+docker rmi ghcr.io/manop55555/roe    # Docker image
+```
+
+After removing the binary, run `hash -r` (bash) or `rehash` (zsh) so your shell forgets
+the old path.
+
 ## Quick start
 
 The examples use this `demo`:
