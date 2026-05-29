@@ -147,8 +147,11 @@ FixtureBuild build_fixtures()
     const CommandResult c_result = run_command(c_compile);
     REQUIRE(c_result.exit_code == 0);
 
+    // -fplt forces a classic PLT stub so the external printf call renders as
+    // printf@plt regardless of the toolchain's default (some CI gcc builds use
+    // -fno-plt, which turns the call into an unnamed indirect GOT call).
     const std::string call_targets_compile =
-        shell_quote_text(cc) + " -g -O0 " + shell_quote(fixture_dir / "call_targets.c") +
+        shell_quote_text(cc) + " -g -O0 -fplt " + shell_quote(fixture_dir / "call_targets.c") +
         " -o " + shell_quote(build.call_targets_executable);
     const CommandResult call_targets_result = run_command(call_targets_compile);
     REQUIRE(call_targets_result.exit_code == 0);
