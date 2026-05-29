@@ -4,26 +4,32 @@ on:
   push:
   pull_request:
 
+# roe requires Capstone >= 5 (it uses the RISC-V decoder headers). The distro
+# package is too old / lacks capstone/riscv.h, so the workflow builds Capstone
+# 5.0.3 from source. The integration tests compile and run native ELF fixtures,
+# so CI runs on Linux only.
+
 jobs:
   build:
-    name: build (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - macos-latest
+    name: build (ubuntu-latest)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install dependencies (Linux)
-        if: runner.os == 'Linux'
+      - name: Install Capstone 5 from source
         run: |
           sudo apt-get update
-          sudo apt-get install -y libcapstone-dev
-      - name: Install dependencies (macOS)
-        if: runner.os == 'macOS'
-        run: brew install capstone
+          sudo apt-get install -y pkg-config
+          git clone --depth 1 --branch 5.0.3 https://github.com/capstone-engine/capstone.git /tmp/capstone
+          cmake -S /tmp/capstone -B /tmp/capstone/build -DCMAKE_BUILD_TYPE=Release \
+            -DCAPSTONE_BUILD_TESTS=OFF -DCAPSTONE_BUILD_CSTOOL=OFF
+          cmake --build /tmp/capstone/build -j
+          sudo cmake --install /tmp/capstone/build
+          sudo ldconfig
+      - name: Show toolchain
+        run: |
+          pkg-config --modversion capstone
+          cmake --version
+          cc --version
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DROE_BUILD_TESTS=ON
       - name: Build
@@ -36,10 +42,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install dependencies
+      - name: Install Capstone 5 from source
         run: |
           sudo apt-get update
-          sudo apt-get install -y libcapstone-dev
+          sudo apt-get install -y pkg-config
+          git clone --depth 1 --branch 5.0.3 https://github.com/capstone-engine/capstone.git /tmp/capstone
+          cmake -S /tmp/capstone -B /tmp/capstone/build -DCMAKE_BUILD_TYPE=Release \
+            -DCAPSTONE_BUILD_TESTS=OFF -DCAPSTONE_BUILD_CSTOOL=OFF
+          cmake --build /tmp/capstone/build -j
+          sudo cmake --install /tmp/capstone/build
+          sudo ldconfig
+      - name: Show toolchain
+        run: |
+          pkg-config --modversion capstone
+          cmake --version
+          cc --version
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DROE_BUILD_TESTS=ON -DROE_SANITIZERS=ON
       - name: Build
