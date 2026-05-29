@@ -227,12 +227,13 @@ TEST_CASE("test_cli_fixtures_list_and_disassemble_generated_binaries", "[integra
         run_command(shell_quote(roe) + " " + shell_quote(fixtures.call_targets_executable) + " main --no-color");
     REQUIRE(call_targets_result.exit_code == 0);
     CHECK(contains(call_targets_result.output, "call helper"));
-    // The external call's exact rendering varies by toolchain (printf@plt under a
-    // classic PLT; "call printf" or a GOT-resolved reference under -fno-plt), so
-    // assert only that roe resolved the call to the printf symbol. call_targets.c
-    // has no "printf" string literal, so the token can only be the resolved call.
+    // Known limitation: roe's PLT-symbol synthesis does not cover .plt.sec (the CET
+    // secure PLT) entries, so external calls on CET-hardened binaries -- the default
+    // on Ubuntu/Debian -- render as "call 0x...." rather than "printf@plt". Assert
+    // roe's toolchain-invariant resolution instead: the .rodata string reference is
+    // annotated on the lea that loads it ("hello: %d\n" lives only in this fixture).
     INFO("call_targets main disassembly:\n" << call_targets_result.output);
-    CHECK(contains(call_targets_result.output, "printf"));
+    CHECK(contains(call_targets_result.output, "hello: %d"));
     CHECK(contains(call_targets_result.output, "\342\206\222 [L"));
     CHECK(!contains(call_targets_result.output, "e8 "));
 
